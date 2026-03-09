@@ -346,8 +346,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     llm_cfg = cfg.get("llm", {}) or {}
     story_cfg = cfg.get("story", {}) or {}
 
-    model = llm_cfg.get("story_model", "gpt-5.2")
-    fallback_model = llm_cfg.get("story_fallback_model", "gpt-5.2")
+    model = llm_cfg.get("story_model", "gpt-5.4")
+    fallback_model = llm_cfg.get("story_fallback_model", "gpt-5.4")
     editor_model = llm_cfg.get("story_editor_model", model)
 
     temperature = float(llm_cfg.get("story_temperature", 0.25))
@@ -581,3 +581,4 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     sources_md = _render_sources_md(news_kr, news_gl, top_k=5)
 
     return header + body + "\n\n" + sources_md + "\n"
+
