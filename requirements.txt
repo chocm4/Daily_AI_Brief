@@ -8,3 +8,6 @@ requests>=2.32.3
 pydantic>=2.8.2
 openai>=1.40.0
 yfinance>=0.2.43
+numpy>=1.26.4
+scikit-learn>=1.5.1
+pykrx>=1.0.48
