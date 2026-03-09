@@ -23,7 +23,7 @@ def _safe_float(x, default=None):
 def _clean_text(s: str) -> str:
     if not s:
         return ""
-    s = re.sub(r"<[^>]+>", " ", s)           # strip html tags
+    s = re.sub(r"<[^>]+>", " ", s)
     s = s.replace("&nbsp;", " ").replace("&amp;", "&")
     s = re.sub(r"\s+", " ", s).strip()
     return s
@@ -59,7 +59,6 @@ def _top_scored_sources(news_kr: list, news_gl: list, top_k: int = 5) -> list:
 
     for x in (news_kr or []) + (news_gl or []):
         key = (
-            str(x.get("id", "")).strip(),
             str(x.get("title", "")).strip(),
             str(x.get("link", "") or x.get("url", "")).strip(),
         )
@@ -104,6 +103,47 @@ def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
     return "\n".join(lines)
 
 
+def _trim_to_chars(text: str, max_chars: int) -> str:
+    text = (text or "").strip()
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+
+    cut = text[:max_chars]
+    candidates = [
+        cut.rfind("\n\n"),
+        cut.rfind("\n"),
+        cut.rfind(". "),
+        cut.rfind("다. "),
+        cut.rfind("다.\n"),
+    ]
+    best = max(candidates)
+    if best >= int(max_chars * 0.7):
+        return cut[:best].rstrip()
+    return cut.rstrip()
+
+
+def _compute_body_budget(header: str, sources_md: str, cfg: Dict[str, Any]) -> int:
+    tg_cfg = cfg.get("telegram", {}) or {}
+    story_cfg = cfg.get("story", {}) or {}
+
+    single_message_only = bool(tg_cfg.get("single_message_only", True))
+    telegram_cap = int(tg_cfg.get("max_message_length", 3500))
+    story_target = int(story_cfg.get("target_chars", 4500))
+    reserve = int(story_cfg.get("telegram_body_reserve_chars", 120))
+
+    if not single_message_only:
+        return max(1200, story_target)
+
+    total_budget = telegram_cap
+    used = len(header) + len(sources_md) + 4 + reserve
+    body_budget = total_budget - used
+
+    # 너무 빡빡해져서 문서 품질이 무너지는 걸 방지
+    return max(900, body_budget)
+
+
 def _format_market_snapshot(market: List[Dict[str, Any]]) -> Dict[str, Any]:
     out = {}
     for row in market or []:
@@ -128,48 +168,34 @@ def _mode_guidance(mode: str) -> str:
     if mode == "US_AFTERCLOSE_KR_PREOPEN":
         return (
             "현재는 '미국장 마감 후 ~ 한국장 개장 전' 구간(US_AFTERCLOSE_KR_PREOPEN). "
-            "미국장 마감 요약(지수/섹터/스타일/금리/달러/원자재/변동성)과, "
-            "그 영향이 오늘 한국장에 어떻게 전이될지(시나리오/업종/수급) 중심으로 써라. "
-            "한국장 전일 내용은 1문단 내로 짧게 연결하고, "
-            "'오늘 체크포인트(지표/이벤트/실적/정책)'를 명확히 제시해라."
+            "미국장 마감 요약과 그 영향이 오늘 한국장에 어떻게 전이될지 중심으로 써라."
         )
 
     if mode == "KR_INTRADAY":
         return (
             "현재는 한국장 장중(KR_INTRADAY). "
-            "오늘 장중 흐름(지수 레벨, 업종 강약, 스타일/대형-중소형, 수급/리스크온오프 단서)을 중심으로 쓰고, "
-            "미국장/글로벌은 '배경'으로 압축해라. "
-            "마감까지 남은 시간에 변곡을 만들 수 있는 요인(뉴스/레벨/크로스에셋)을 제시해라."
+            "오늘 장중 흐름과 마감 전 변수가 될 포인트를 중심으로 써라."
         )
 
     if mode == "KR_AFTERCLOSE_US_PREOPEN":
         return (
             "현재는 '한국장 마감 후 ~ 미국장 개장 전' 구간(KR_AFTERCLOSE_US_PREOPEN). "
-            "오늘 한국장 리뷰(무엇이 올랐고/내렸고/왜 그랬는지, 수급/업종/키 이슈)를 가장 비중 있게 쓰고, "
-            "미국장 개장 전 주목할 이벤트/리스크(지표, 연준 발언, 실적, 지정학)를 연결해라. "
-            "마지막은 '오늘 한국장 흐름이 미국장에 어떤 포지셔닝으로 이어질지' 관점으로 마무리해라."
+            "오늘 한국장 리뷰와 미국장 개장 전 체크포인트 중심으로 써라."
         )
 
     if mode == "US_INTRADAY":
         return (
             "현재는 미국장 장중(US_INTRADAY). "
-            "미국장 현재 흐름(지수/섹터/빅테크/금리/달러/원자재/변동성)을 중심으로, "
-            "아시아/한국 마감 흐름과의 연결(리스크온오프, 달러/금리 경로)을 짚어라. "
-            "남은 장중에 주목할 이벤트(지표 발표 시각, 실적, 발언)와 "
-            "레벨(금리/달러/주요 지수)을 제시해라."
+            "미국장 현재 흐름과 아시아/한국장과의 연결을 중심으로 써라."
         )
 
     if mode == "WEEKEND":
         return (
             "현재는 주말/휴장 구간(WEEKEND). "
-            "가장 최근 거래일(한국/미국) 핵심 요약 + 주말 동안 체크해야 할 이벤트/리스크를 중심으로 쓰고, "
-            "다음 거래일 시나리오(상방/하방 트리거)를 제시해라."
+            "직전 거래일 핵심 요약과 다음 거래일 체크포인트를 중심으로 써라."
         )
 
-    return (
-        "현재는 일반 구간. "
-        "한국/미국 시장의 최근 흐름을 연결해 핵심 이벤트와 다음 세션의 체크포인트를 정리해라."
-    )
+    return "한국/미국 시장의 최근 흐름을 연결해 핵심 이벤트와 다음 세션 체크포인트를 정리해라."
 
 
 # -----------------------------
@@ -339,6 +365,53 @@ def _responses_call(
     return text, model_used, usage_dict
 
 
+def _compress_to_budget(
+    client: OpenAI,
+    model: str,
+    text: str,
+    body_budget: int,
+    temperature: float,
+    max_tokens: int,
+    log=None,
+) -> str:
+    text = (text or "").strip()
+    if len(text) <= body_budget:
+        return text
+
+    sys_prompt = f"""
+너는 한국 sell-side 리서치센터의 에디터다.
+아래 글을 의미 손실을 최소화하면서 압축해라.
+
+규칙:
+- 최종 본문 길이는 반드시 {body_budget}자 이하여야 한다.
+- 새 사실/새 수치/새 일정 추가 금지.
+- 문단 연결과 핵심 인과는 유지.
+- 군더더기, 반복, 장황한 수식어 제거.
+- bullet 금지, 자연스러운 서술문 유지.
+- "## Sources" 섹션 작성 금지.
+"""
+
+    user_prompt = "압축 대상:\n```text\n" + text + "\n```"
+
+    try:
+        out, model_used, _ = _responses_call(
+            client,
+            model,
+            sys_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        out = (out or "").strip()
+        if log:
+            log.info(f"[story-compressor] model_used={model_used} | before={len(text)} | after={len(out)} | budget={body_budget}")
+        return out
+    except Exception as e:
+        if log:
+            log.warning(f"compressor pass failed: {e}")
+        return text
+
+
 # -----------------------------
 # main
 # -----------------------------
@@ -350,13 +423,12 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     fallback_model = llm_cfg.get("story_fallback_model", "gpt-5.4")
     editor_model = llm_cfg.get("story_editor_model", model)
 
-    temperature = float(llm_cfg.get("story_temperature", 0.25))
-    editor_temperature = float(llm_cfg.get("story_editor_temperature", 0.15))
+    temperature = float(llm_cfg.get("story_temperature", 0.15))
+    editor_temperature = float(llm_cfg.get("story_editor_temperature", 0.10))
 
-    max_tokens = int(llm_cfg.get("story_max_output_tokens", 2600))
+    max_tokens = int(llm_cfg.get("story_max_output_tokens", 3200))
     editor_max_tokens = int(llm_cfg.get("story_editor_max_output_tokens", max_tokens))
 
-    target_chars = int(story_cfg.get("target_chars", 3000))
     max_paragraphs = int(story_cfg.get("max_paragraphs", 6))
     min_paragraphs = int(story_cfg.get("min_paragraphs", 4))
     sentences_per_paragraph = story_cfg.get("sentences_per_paragraph", "2-4")
@@ -367,16 +439,16 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     mode = fact_pack.get("run_mode") or "AFTERCLOSE"
     guidance = _mode_guidance(mode)
 
-    kr_items_n = int(story_cfg.get("kr_items", 28))
-    gl_items_n = int(story_cfg.get("global_items", 24))
+    kr_items_n = int(story_cfg.get("kr_items", 30))
+    gl_items_n = int(story_cfg.get("global_items", 26))
     desc_chars = int(story_cfg.get("news_desc_chars", 360))
-    max_themes = int(story_cfg.get("max_themes", 6))
+    max_themes = int(story_cfg.get("max_themes", 7))
 
     news_kr = _clip_news(fact_pack.get("news_kr", []) or [], kr_items_n, desc_chars=desc_chars)
     news_gl = _clip_news(fact_pack.get("news_overnight", []) or fact_pack.get("news_global", []) or [], gl_items_n, desc_chars=desc_chars)
 
-    brief_kr = _clip_news(fact_pack.get("brief_kr", []) or [], int(story_cfg.get("brief_kr_items", 14)), desc_chars=desc_chars)
-    brief_gl = _clip_news(fact_pack.get("brief_global", []) or [], int(story_cfg.get("brief_gl_items", 14)), desc_chars=desc_chars)
+    brief_kr = _clip_news(fact_pack.get("brief_kr", []) or [], int(story_cfg.get("brief_kr_items", 12)), desc_chars=desc_chars)
+    brief_gl = _clip_news(fact_pack.get("brief_global", []) or [], int(story_cfg.get("brief_gl_items", 12)), desc_chars=desc_chars)
 
     market = _format_market_snapshot(fact_pack.get("market", []) or [])
     drivers = report.get("top_drivers", []) if isinstance(report, dict) else []
@@ -405,11 +477,21 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
                 "net_buy_1e8krw": keep,
             }
 
+    asof = fact_pack.get("asof") or ""
+    gen = fact_pack.get("generated_at_kst") or ""
+    header = f"# Daily Market Review (as of {asof})\n\n"
+    if gen:
+        header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
+
+    sources_md = _render_sources_md(news_kr, news_gl, top_k=5)
+    body_budget = _compute_body_budget(header, sources_md, cfg)
+
     context = {
-        "asof": fact_pack.get("asof"),
-        "generated_at_kst": fact_pack.get("generated_at_kst"),
+        "asof": asof,
+        "generated_at_kst": gen,
         "run_mode": mode,
         "mode_guidance": guidance,
+        "body_budget_chars": body_budget,
         "headline_hint": report.get("headline") if isinstance(report, dict) else "",
         "market": market,
         "krx_flows": krx_flows_compact,
@@ -428,58 +510,31 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     }
 
     sys_prompt = f"""
-너는 한국 sell-side 증권사 리서치센터의 'Daily Market Review'을 작성하는 시황/Quant 애널리스트다.
-아래 컨텍스트(JSON)에 있는 '시장 수치'와 '뉴스(제목+description+링크+태그+ID)'만 근거로 사용해라.
-컨텍스트 밖의 사실/일정/수치를 만들어내면 안 된다.
+너는 한국 sell-side 증권사 리서치센터의 Daily Market Review를 작성하는 시황/Quant 애널리스트다.
+아래 컨텍스트(JSON)에 있는 정보만 근거로 사용해라.
+컨텍스트 밖 사실/수치/일정을 만들지 마라.
 
-[산출 시각/장상황 모드]
-- run_mode={mode}
-- mode_guidance: {guidance}
+중요:
+- 최종 본문(body)은 반드시 {body_budget}자 이하여야 한다.
+- 이 제한은 매우 중요하다. 길어지면 안 된다.
+- 장황한 설명보다 핵심 인과와 연결을 우선한다.
+- 글 마지막에 Sources는 작성하지 마라. 출처 목록은 코드가 별도로 붙인다.
 
-[핵심 문제: 문단 연결성]
-- 문단이 따로 놀지 않게, 각 문단 첫 문장은 반드시 "이전 문단의 결론"을 한 번 받아서 이어가라(예: '이런 배경에서', '다만', '한편', '그 결과').
-- 주제가 바뀌면 반드시 '왜 지금 이 주제로 넘어가는지' 연결 문장을 1문장 넣어라.
-- 같은 말을 반복하지 말고, 원인→경로→결과(Transmission)로 논리를 전개해라.
+작성 목표:
+- 결과물은 bullet이 아니라 하나의 자연스러운 시황 글이다.
+- 문단 수는 {min_paragraphs}~{max_paragraphs}개.
+- 문단당 {sentences_per_paragraph}문장.
+- 원인 → 경로 → 결과 구조를 유지.
+- 핵심 주제 3~5개 중심으로 압축적으로 작성.
+- 한국장/미국장/금리/환율/수급 중 설명력이 높은 것 위주로 선택.
+- 반복, 군더더기, 같은 말 바꿔쓰기 금지.
+- 수치 나열 금지, 해석 중심.
+- 채권/금리 자산이 있으면 금리 문단을 짧게라도 포함.
 
-[작성 목표]
-- 결과물은 bullet이 아니라 서론→(전일/오늘 국내장)→원인·촉매(뉴스 연결)→크로스에셋 반응→(필요시)Macro Brief→오버나이트→체크포인트→결론으로 이어지는 '한 편의 글'이다.
-- 문단 수는 {min_paragraphs}~{max_paragraphs}개, 문단당 {sentences_per_paragraph}문장.
-- 반드시 “원인/촉매(뉴스) → 시장 반응(지수/환율/금리/원자재/변동성)”의 인과를 문장으로 연결해라.
-- themes_kr/themes_global을 참고해 '큰 주제 4~6개' 중심으로 전개하되, 억지로 다 넣지 말고 가장 설명력이 높은 축을 우선하라.
-
-[채권/금리(필수 조건부)]
-- 컨텍스트.market 안에 kind="yield" 자산이 1개라도 있으면, 채권/금리 시황 문단을 최소 1개 포함해라.
-- 금리 자산의 변동은 ret1d_pct가 아니라 chg1d_bp(=bp 변화)와 level(금리 레벨)을 사용해라.
-- 전개는 "금리 변화 → (뉴스 기반) 기대/리스크 경로 → 주식/달러/원자재로의 전이" 순서를 우선하라.
-
-[업종/종목/수급(추가)]
-- kr_sector_highlights.available=True이고 has_feature=True이면:
-  업종 강/약(상위/하위)과 수치(수익률 %)를 자연스럽게 본문에 녹여라.
-  단, ‘강제 1문단’처럼 티 나게 넣지 말고, 오늘 흐름을 설명하는 과정에서 자연스럽게 연결해라.
-- kr_mover_highlights가 있으면, 종목 레벨은 “테마/뉴스 흐름과 연결이 가능한 경우”에만 간단히 언급해라(과도한 나열 금지).
-- 컨텍스트.krx_flows에 값이 있으면, KOSPI/KOSDAQ 투자자별 순매수(억원)를 1~2문장으로 자연스럽게 본문에 녹여라.
-- 수급 수치는 net_buy_1e8krw(=억원)만 사용하고, 표기는 "외국인/기관/개인" 3개를 우선으로 하되 컨텍스트에 있는 키만 써라.
-- krx_flows가 비어 있으면 수급을 억지로 쓰거나 추정하지 마라.
-- 컨텍스트.krx_flow_tops가 있으면, "오늘 수급 주도 종목 TOP5"를 1회만 언급해라.
-  단, 종목을 5개 그대로 나열하지 말고 (가능하면) 2~3개만 대표로 언급하고,
-  나머지는 "상위권" 정도로 뭉뚱그려라. 과도한 나열 금지.
-- 컨텍스트.rally_decomp가 있으면, "외국인 주도 / 기관 주도 / 개인 주도"를 단정하지 말고
-  foreign_1e8krw / retail_1e8krw 수치에 근거해 "~가능성", "~성격" 정도로만 표현해라.
-  (dominant_actor_hint는 힌트일 뿐이며, 시장 전체 수급으로만 코멘트할 것)
-
-[Macro/Policy Market Brief]
-- brief_kr / brief_global을 활용해 ‘주식시장과 1:1로 직접 연결되지 않더라도 시황/퀀트가 알아야 할 이슈’를 1~2개 문단으로 정리해라.
-- 영향은 단정하지 말고 시나리오(상방/하방/변동성) 형태로.
-
-[출처 표기(중요)]
-- 본문에 [Nxx] 같은 표기는 쓰지 마라.
-- 글 마지막에 "## Sources" 섹션을 직접 작성하지 마라.
-- 출처 목록은 후처리 코드가 별도로 붙인다.
-- 링크는 본문에 굳이 반복하지 마라.
-
-[문체]
-- 증권사 시황 톤(중립적/단정 피하기: "~로 해석", "~가능성", "~에 주목").
-- 학생 에세이 느낌 금지: 구어체/감탄/과장 금지.
+문체:
+- 증권사 시황 톤
+- 단정 대신 "~로 해석", "~가능성", "~에 주목"
+- 구어체/감탄/과장 금지
 """
 
     user_prompt = "컨텍스트(JSON):\n```json\n" + json.dumps(context, ensure_ascii=False, indent=2) + "\n```"
@@ -498,21 +553,21 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         )
 
     if log:
-        log.info(f"[story] model_used={model_used} | usage={usage}")
+        log.info(f"[story] model_used={model_used} | usage={usage} | body_budget={body_budget}")
 
     txt = (draft or "").strip()
 
     if enable_editor_pass and txt:
-        editor_sys = """
-너는 한국 sell-side 리서치센터의 '에디터'다.
-아래 초안을 '더 자연스럽고, 문단 간 연결이 매끄럽고, 리서치센터 톤'으로 편집해라.
+        editor_sys = f"""
+너는 한국 sell-side 리서치센터의 에디터다.
+아래 초안을 더 자연스럽고 단단한 시황 문장으로 다듬어라.
 
-[절대 규칙]
-- 새 사실/새 수치/새 이벤트를 추가하지 마라.
-- 컨텍스트 밖 정보를 추론해 단정하지 마라.
-- 논리 전개를 더 명확히(원인→경로→결과), 문단 연결 문장을 강화해라.
-- 반복/나열을 줄이고, 문장 구조를 성숙하게 바꿔라(학생 느낌 제거).
-- "## Sources" 섹션은 수정하거나 새로 만들지 마라.
+절대 규칙:
+- 새 사실/새 수치/새 일정 추가 금지
+- 최종 본문 길이는 반드시 {body_budget}자 이하여야 한다
+- 반복/장황함 제거
+- 논리 연결 강화
+- Sources 섹션 작성 금지
 """
         editor_user = "초안:\n```text\n" + txt + "\n```"
 
@@ -523,21 +578,23 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
             if edited and edited.strip():
                 txt = edited.strip()
                 if log:
-                    log.info(f"[story-editor] model_used={editor_used}")
+                    log.info(f"[story-editor] model_used={editor_used} | len={len(txt)}")
         except Exception as e:
             if log:
                 log.warning(f"editor pass failed: {e}")
 
-    if enable_expander_pass and txt and len(txt) < int(target_chars * 0.9):
-        exp_sys = """
-너는 한국 sell-side 리서치센터의 '확장 편집자'다.
-아래 글을 더 자세하게 확장하되, 반드시 기존 컨텍스트/초안에 들어있는 근거(description)에만 기반해라.
+    # 예산 여유가 있을 때만 확장
+    if enable_expander_pass and txt and len(txt) < int(body_budget * 0.78):
+        exp_target = min(body_budget, int(body_budget * 0.92))
+        exp_sys = f"""
+너는 한국 sell-side 리서치센터의 확장 편집자다.
+아래 글을 조금만 더 풍부하게 만들되, 최종 본문 길이는 반드시 {exp_target}자 이하여야 한다.
 
-[규칙]
-- 새 사실/새 수치/새 일정 추가 금지.
-- '왜 그 뉴스가 시장에 영향을 줬는지'를 경로(금리→밸류에이션→업종/스타일, 유가→인플레→금리 기대 등)로 설명을 보강해라.
-- 문단 사이 연결을 더 강화해라.
-- "## Sources" 섹션은 건드리지 마라.
+규칙:
+- 새 사실/새 수치/새 일정 추가 금지
+- 핵심 인과와 연결만 보강
+- 반복 금지
+- Sources 섹션 작성 금지
 """
         exp_user = (
             "확장 대상 글:\n```text\n" + txt + "\n```\n\n"
@@ -570,15 +627,53 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
             if log:
                 log.warning(f"expander pass failed: {e}")
 
-    asof = fact_pack.get("asof") or ""
-    gen = fact_pack.get("generated_at_kst") or ""
+    txt = _strip_sources_section((txt or "").strip())
 
-    header = f"# Daily Market Review (as of {asof})\n\n"
-    if gen:
-        header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
+    # 본문이 예산 초과면 "잘라내기" 전에 먼저 압축
+    if len(txt) > body_budget:
+        txt = _compress_to_budget(
+            client=client,
+            model=editor_model,
+            text=txt,
+            body_budget=body_budget,
+            temperature=0.05,
+            max_tokens=editor_max_tokens,
+            log=log,
+        ).strip()
 
-    body = _strip_sources_section((txt or "").strip())
-    sources_md = _render_sources_md(news_kr, news_gl, top_k=5)
+    # 마지막 안전장치
+    if len(txt) > body_budget:
+        txt = _trim_to_chars(txt, body_budget)
 
-    return header + body + "\n\n" + sources_md + "\n"
+    final_md = header + txt + "\n\n" + sources_md + "\n"
 
+    # 정말 드물게 전체 길이가 cap을 넘으면 본문만 추가 압축
+    tg_cfg = cfg.get("telegram", {}) or {}
+    if bool(tg_cfg.get("single_message_only", True)):
+        total_cap = int(tg_cfg.get("max_message_length", 3500))
+        if len(final_md) > total_cap:
+            extra_over = len(final_md) - total_cap
+            tighter_budget = max(700, body_budget - extra_over - 20)
+
+            txt = _compress_to_budget(
+                client=client,
+                model=editor_model,
+                text=txt,
+                body_budget=tighter_budget,
+                temperature=0.05,
+                max_tokens=editor_max_tokens,
+                log=log,
+            ).strip()
+
+            if len(txt) > tighter_budget:
+                txt = _trim_to_chars(txt, tighter_budget)
+
+            final_md = header + txt + "\n\n" + sources_md + "\n"
+
+            if len(final_md) > total_cap:
+                # 여기까지 오면 정말 예외적이므로 최소 trim만 적용
+                body_only_budget = max(500, tighter_budget - (len(final_md) - total_cap) - 10)
+                txt = _trim_to_chars(txt, body_only_budget)
+                final_md = header + txt + "\n\n" + sources_md + "\n"
+
+    return final_md
