@@ -11,6 +11,7 @@ from .ingest.rss import fetch_all_rss
 from .ingest.normalize import normalize_entries
 from .nlp.dedupe import dedupe_items
 from .nlp.semantic_cluster import semantic_cluster
+from .nlp.event_enricher import enrich_event_metadata
 from .nlp.tagger import tag_and_score
 from .nlp.filtering import filter_market_news, filter_brief_news
 from .nlp.ranker import select_top_news
@@ -18,6 +19,7 @@ from .nlp.ranker import select_top_news
 from .market.market_data import fetch_market_snapshot
 from .market.sectors_krx import fetch_krx_sector_snapshot
 from .market.flows_krx import fetch_krx_investor_flow, fetch_krx_top_netbuy_tickers
+from .market.market_context import build_market_context
 
 from .fact_pack import build_fact_pack
 from .llm.writer import generate_report
@@ -153,7 +155,8 @@ def main():
     # 2) dedupe
     items = dedupe_items(items, similarity=cfg["rss"]["dedupe_similarity"], log=log)
 
-    # 3) tag + score
+    # 3) event enrich + tag + score
+    items = enrich_event_metadata(items, log=log)
     items = tag_and_score(items, cfg, log)
 
     # 3a) keep copy before market-only filter
@@ -268,6 +271,13 @@ def main():
 
     if sectors_kr:
         fact_pack["kr_sectors"] = sectors_kr
+
+    fact_pack["market_context"] = build_market_context(
+        market=market,
+        sectors_kr=sectors_kr,
+        krx_flows=flows_krx,
+        krx_flow_tops=fact_pack.get("krx_flow_tops"),
+    )
 
     save_json(out_root / "fact_pack.json", fact_pack, log)
 

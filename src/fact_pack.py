@@ -1,4 +1,5 @@
 import datetime as dt
+from collections import defaultdict
 from dateutil import parser as dtparser
 from dateutil import tz
 
@@ -10,7 +11,7 @@ UTC = tz.UTC
 
 def _prev_business_day(d: dt.date) -> dt.date:
     x = d - dt.timedelta(days=1)
-    while x.weekday() >= 5:  # Sat/Sun
+    while x.weekday() >= 5:
         x -= dt.timedelta(days=1)
     return x
 
@@ -23,7 +24,6 @@ def _to_kst(published_iso: str, region: str) -> dt.datetime | None:
     except Exception:
         return None
 
-    # tz 없는 경우: KR은 KST로, 그 외는 UTC로 가정(현실적인 타협)
     if t.tzinfo is None:
         if (region or "").upper() == "KR":
             t = t.replace(tzinfo=KST)
@@ -33,107 +33,152 @@ def _to_kst(published_iso: str, region: str) -> dt.datetime | None:
     return t.astimezone(KST)
 
 
-def _in_window(t: dt.datetime | None, start: dt.datetime, end: dt.datetime) -> bool:
-    if t is None:
-        return False
-    return (start <= t) and (t <= end)
+def _latest_in_lookback(items: list[dict], region_hint: str, cutoff: dt.datetime) -> list[dict]:
+    keep = []
+    for n in items:
+        t = _to_kst(n.get("published", ""), region_hint)
+        if t is None:
+            continue
+        if t >= cutoff:
+            keep.append(n)
+    keep = sorted(
+        keep,
+        key=lambda x: _to_kst(x.get("published", ""), x.get("region", region_hint)) or dt.datetime(1970, 1, 1, tzinfo=KST),
+        reverse=True,
+    )
+    return keep
+
+
+def _slim_news(n: dict) -> dict:
+    return {
+        "id": n.get("id"),
+        "event_id": n.get("event_id"),
+        "title": n.get("title", ""),
+        "representative_title": n.get("representative_title", n.get("title", "")),
+        "source": n.get("source", ""),
+        "published": n.get("published", ""),
+        "url": n.get("link", ""),
+        "tags": n.get("tags", []),
+        "score": n.get("score", 0.0),
+        "region": n.get("region", ""),
+        "event_type": n.get("event_type", "general_market"),
+        "impact_scope": n.get("impact_scope", "secondary"),
+        "korea_relevance": n.get("korea_relevance", "low"),
+        "korea_relevance_score": n.get("korea_relevance_score", 0.0),
+        "cluster_mentions": n.get("cluster_mentions", n.get("mentions", 1)),
+        "cluster_source_count": n.get("cluster_source_count", len(n.get("mention_sources") or [])),
+        "entities": n.get("entities", []),
+        "market_links": n.get("market_links", []),
+        "mention_sources": n.get("mention_sources", []),
+    }
+
+
+def _build_event_pack(items: list[dict]) -> list[dict]:
+    groups = defaultdict(list)
+    for n in items or []:
+        groups[str(n.get("event_id") or n.get("id"))].append(n)
+
+    events = []
+    for event_id, group in groups.items():
+        rep = sorted(
+            group,
+            key=lambda x: (
+                {"market_moving": 3, "sector_moving": 2, "secondary": 1}.get(x.get("impact_scope", "secondary"), 0),
+                float(x.get("korea_relevance_score") or 0.0),
+                int(x.get("cluster_mentions") or 1),
+                float(x.get("score") or 0.0),
+            ),
+            reverse=True,
+        )[0]
+        sources = []
+        for x in group:
+            for s in (x.get("mention_sources") or []):
+                if s not in sources:
+                    sources.append(s)
+        news_ids = [x.get("id") for x in group if x.get("id")]
+        events.append(
+            {
+                "event_id": event_id,
+                "theme": rep.get("representative_title") or rep.get("title"),
+                "event_type": rep.get("event_type", "general_market"),
+                "impact_scope": rep.get("impact_scope", "secondary"),
+                "region": rep.get("region", ""),
+                "summary": rep.get("title", ""),
+                "news_ids": news_ids,
+                "source_count": int(rep.get("cluster_source_count") or len(sources)),
+                "mention_count": int(rep.get("cluster_mentions") or len(group)),
+                "entities": rep.get("entities", []),
+                "market_links": rep.get("market_links", []),
+                "korea_relevance": rep.get("korea_relevance", "low"),
+                "korea_relevance_score": rep.get("korea_relevance_score", 0.0),
+                "sources": sources,
+                "published": rep.get("published", ""),
+                "score": rep.get("score", 0.0),
+            }
+        )
+
+    events.sort(
+        key=lambda x: (
+            {"market_moving": 3, "sector_moving": 2, "secondary": 1}.get(x.get("impact_scope", "secondary"), 0),
+            float(x.get("korea_relevance_score") or 0.0),
+            int(x.get("mention_count") or 0),
+            int(x.get("source_count") or 0),
+            float(x.get("score") or 0.0),
+        ),
+        reverse=True,
+    )
+    return events
 
 
 def build_fact_pack(asof: dt.date, top_news: list[dict], market: list[dict] | None, cfg: dict) -> dict:
     market = market or []
     top_news = top_news or []
 
-    # KR / GLOBAL 뉴스 분리
     news_kr = [n for n in top_news if (n.get("region") == "KR")]
     news_gl = [n for n in top_news if (n.get("region") != "KR")]
 
-    # ---- slim: report/llm에 필요한 필드만 ----
-    def slim(n: dict) -> dict:
-        return {
-            "id": n.get("id"),
-            "title": n.get("title", ""),
-            "source": n.get("source", ""),
-            "published": n.get("published", ""),
-            "url": n.get("link", ""),
-            "tags": n.get("tags", []),
-            "score": n.get("score", 0.0),
-            "region": n.get("region", ""),
-        }
+    news_kr_slim = [_slim_news(n) for n in news_kr]
+    news_gl_slim = [_slim_news(n) for n in news_gl]
 
-    news_kr_slim = [slim(n) for n in news_kr]
-    news_gl_slim = [slim(n) for n in news_gl]
-
-    # =========================================================
-    # fixed cut-off 제거, rolling lookback(최근 N시간) 적용
-    # =========================================================
     now_kst = dt.datetime.now(tz=KST)
     lookback_hours = int((cfg.get("rss", {}) or {}).get("lookback_hours", 36))
     cutoff = now_kst - dt.timedelta(hours=lookback_hours)
 
-    def latest_in_lookback(items: list[dict], region_hint: str) -> list[dict]:
-        keep = []
-        for n in items:
-            t = _to_kst(n.get("published", ""), region_hint)
-            if t is None:
-                continue
-            if t >= cutoff:
-                keep.append(n)
+    news_kr_session = _latest_in_lookback(news_kr_slim, "KR", cutoff)
+    news_overnight = _latest_in_lookback(news_gl_slim, "GLOBAL", cutoff)
 
-        # 최신순 정렬
-        keep = sorted(
-            keep,
-            key=lambda x: _to_kst(x.get("published", ""), x.get("region", region_hint))
-            or dt.datetime(1970, 1, 1, tzinfo=KST),
-            reverse=True,
-        )
-        return keep
+    if len(news_kr_session) < 10:
+        news_kr_session = sorted(news_kr_slim, key=lambda x: float(x.get("score", 0.0)), reverse=True)[: min(18, len(news_kr_slim))]
+    if len(news_overnight) < 10:
+        news_overnight = sorted(news_gl_slim, key=lambda x: float(x.get("score", 0.0)), reverse=True)[: min(18, len(news_gl_slim))]
 
-    # ✅ 기존 이름은 유지하되 의미를 바꿈:
-    # - news_kr_session: 최근 N시간 KR 뉴스(최신순)
-    # - news_overnight: 최근 N시간 GLOBAL 뉴스(최신순)
-    news_kr_session = latest_in_lookback(news_kr_slim, "KR")
-    news_overnight = latest_in_lookback(news_gl_slim, "GLOBAL")
-
-    # 너무 비면(피드 타임스탬프가 빈약한 경우) fallback: 점수순 상위로 채우기
-    if len(news_kr_session) < 12:
-        news_kr_session = sorted(news_kr_slim, key=lambda x: x.get("score", 0.0), reverse=True)[
-            : min(20, len(news_kr_slim))
-        ]
-    if len(news_overnight) < 12:
-        news_overnight = sorted(news_gl_slim, key=lambda x: x.get("score", 0.0), reverse=True)[
-            : min(20, len(news_gl_slim))
-        ]
-
-    # (참고) prev_bd는 표시용 메타에만 사용
     prev_bd = _prev_business_day(asof)
+    event_pack = _build_event_pack(top_news)
 
     return {
         "asof": asof.isoformat(),
         "timezone": cfg.get("app", {}).get("timezone", "Asia/Seoul"),
-
-        # 전체 top 뉴스(근거 목록)
         "news_kr": news_kr_slim,
         "news_global": news_gl_slim,
-
-        # ✅ rolling 최신 묶음(보고서가 우선 사용)
+        "events": event_pack,
+        "events_top": event_pack[:12],
         "session": {
             "asof": asof.isoformat(),
             "kr_date_ref": prev_bd.isoformat(),
             "latest_now_kst": now_kst.isoformat(timespec="minutes"),
             "lookback_hours": lookback_hours,
             "latest_window_kst": f"{cutoff.strftime('%Y-%m-%d %H:%M')}~{now_kst.strftime('%Y-%m-%d %H:%M')}",
-            "note": "Fixed cut-off 없이 최근 lookback_hours 기준으로 KR/GLOBAL 최신 뉴스를 구성",
+            "note": "최근 lookback_hours 기준으로 KR/GLOBAL 최신 뉴스를 구성",
         },
         "news_kr_session": news_kr_session,
         "news_overnight": news_overnight,
-
         "market": market,
         "risk_radar_rules": build_risk_radar(market),
-
         "notes": {
             "policy": "No verbatim quotes. Paraphrase. Attach source IDs to any news-driven claim.",
             "rss_only": True,
-            "session_logic": "Rolling lookback (no fixed 18:30/09:00 cut-offs). KR/GLOBAL both filtered by rss.lookback_hours.",
+            "session_logic": "Rolling lookback (no fixed cut-offs).",
             "timezone_assumption_if_missing": "KR->KST, GLOBAL->UTC",
+            "analyst_style": "관찰-해석-시사점 구조. 근거 없는 단정 금지.",
         },
     }
