@@ -4,200 +4,205 @@ app:
   output_dir: outputs
   cache_dir: data/cache
   log_level: INFO
+
 rss:
   include_description: true
   max_items_per_feed: 80
   lookback_hours: 36
   dedupe_similarity: 90
-  dedupe_fields: 
-  - title
-  - description
+  dedupe_fields:
+    - title
+    - description
   dedupe_method: token_set
   dedupe_text_max_chars: 800
   dedupe_min_title_chars: 12
   top_n: 60
   feeds:
-  - name: MK 경제
-    url: https://www.mk.co.kr/rss/30100041/
-    weight: 1.0
-    region: KR
-  - name: MK 국제
-    url: https://www.mk.co.kr/rss/30300018/
-    weight: 1.0
-    region: KR
-  - name: MK 기업·경영
-    url: https://www.mk.co.kr/rss/50100032/
-    weight: 1.0
-    region: KR
-  - name: MK 증권
-    url: https://www.mk.co.kr/rss/50200011/
-    weight: 1.0
-    region: KR
-  - name: 한경 증권
-    url: https://www.hankyung.com/feed/finance
-    weight: 1.0
-    region: KR
-  - name: 한경 경제
-    url: https://www.hankyung.com/feed/economy
-    weight: 1.0
-    region: KR
-  - name: 한경 국제
-    url: https://www.hankyung.com/feed/international
-    weight: 1.0
-    region: KR
-  - name: 파이낸셜 경제
-    url: http://www.fnnews.com/rss/r20/fn_realnews_economy.xml
-    weight: 1.0
-    region: KR
-  - name: 파이낸셜 증권
-    url: http://www.fnnews.com/rss/r20/fn_realnews_stock.xml
-    weight: 1.0
-    region: KR
-  - name: 파이낸셜 금융
-    url: http://www.fnnews.com/rss/r20/fn_realnews_finance.xml
-    weight: 1.0
-    region: KR
-  - name: 연합 마켓
-    url: https://www.yna.co.kr/rss/market.xml
-    weight: 1.0
-    region: KR
-  - name: 연합 경제
-    url: https://www.yna.co.kr/rss/economy.xml
-    weight: 1.0
-    region: KR
-  - name: 연합 세계
-    url: https://www.yna.co.kr/rss/international.xml
-    weight: 1.0
-    region: KR
-  - name: 조선 경제
-    url: https://www.chosun.com/arc/outboundfeeds/rss/category/economy/?outputType=xml
-    weight: 1.0
-    region: KR
-  - name: 조선 국제
-    url: https://www.chosun.com/arc/outboundfeeds/rss/category/international/?outputType=xml
-    weight: 1.0
-    region: KR
-  - name: 동아 경제
-    url: https://rss.donga.com/economy.xml
-    weight: 1.0
-    region: KR
-  - name: 동아 국제
-    url: https://rss.donga.com/international.xml
-    weight: 1.0
-    region: KR
-  - name: 한겨레 경제
-    url: https://www.hani.co.kr/rss/economy/
-    weight: 1.0
-    region: KR
-  - name: 한겨레 국제
-    url: https://www.hani.co.kr/rss/international/
-    weight: 1.0
-    region: KR
-  - name: 경향 경제
-    url: http://www.khan.co.kr/rss/rssdata/economy_news.xml
-    weight: 1.0
-    region: KR
-  - name: 경향 국제
-    url: http://www.khan.co.kr/rss/rssdata/kh_world.xml
-    weight: 1.0
-    region: KR
-  - name: 금융위원회 보도자료
-    url: http://www.fsc.go.kr/about/fsc_bbs_rss/?fid=0111
-    weight: 1.0
-    region: KR
-  - name: Fed Press Releases (all)
-    url: https://www.federalreserve.gov/feeds/press_all.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: Fed Speeches & Testimony
-    url: https://www.federalreserve.gov/feeds/speeches.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: BBC Business (UK edition)
-    url: http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/business/rss.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: BBC World (UK edition)
-    url: http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/world/rss.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: Investing.com - All News
-    url: https://www.investing.com/rss/news.rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Investing.com - Stock Market News
-    url: https://www.investing.com/rss/news_25.rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Reuters.com - Financial News
-    url: https://ir.thomsonreuters.com/rss/news-releases.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: Nasdaq - Markets
-    url: https://www.nasdaq.com/feed/rssoutbound?category=Markets
-    weight: 1.0
-    region: GLOBAL
-  - name: New York Times - World
-    url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: New York Times - Business
-    url: https://rss.nytimes.com/services/xml/rss/nyt/Business.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: Google
-    url: https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko
-    weight: 1.0
-    region: GLOBAL
-  - name: Bloomberg - Market
-    url: https://feeds.bloomberg.com/markets/news.rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Bloomberg - Economy
-    url: https://feeds.bloomberg.com/economics/news.rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Financial Times - World
-    url: https://www.ft.com/world?format=rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Financial Times - Market
-    url: https://www.ft.com/markets?format=rss
-    weight: 1.0
-    region: GLOBAL
-  - name: Wall Street Journal - World
-    url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: Wall Street Journal - Market
-    url: https://feeds.a.dj.com/rss/RSSMarketsMain.xml
-    weight: 1.0
-    region: GLOBAL
-  - name: CNBC
-    url: https://www.cnbc.com/id/100003114/device/rss/rss.html
-    weight: 1.0
-    region: GLOBAL
-  - name: MarketWatch
-    url: https://feeds.content.dowjones.io/public/rss/mw_topstories
-    weight: 1.0
-    region: GLOBAL
-    
+    - name: MK 경제
+      url: https://www.mk.co.kr/rss/30100041/
+      weight: 1.0
+      region: KR
+    - name: MK 국제
+      url: https://www.mk.co.kr/rss/30300018/
+      weight: 1.0
+      region: KR
+    - name: MK 기업·경영
+      url: https://www.mk.co.kr/rss/50100032/
+      weight: 1.0
+      region: KR
+    - name: MK 증권
+      url: https://www.mk.co.kr/rss/50200011/
+      weight: 1.0
+      region: KR
+    - name: 한경 증권
+      url: https://www.hankyung.com/feed/finance
+      weight: 1.0
+      region: KR
+    - name: 한경 경제
+      url: https://www.hankyung.com/feed/economy
+      weight: 1.0
+      region: KR
+    - name: 한경 국제
+      url: https://www.hankyung.com/feed/international
+      weight: 1.0
+      region: KR
+    - name: 파이낸셜 경제
+      url: http://www.fnnews.com/rss/r20/fn_realnews_economy.xml
+      weight: 1.0
+      region: KR
+    - name: 파이낸셜 증권
+      url: http://www.fnnews.com/rss/r20/fn_realnews_stock.xml
+      weight: 1.0
+      region: KR
+    - name: 파이낸셜 금융
+      url: http://www.fnnews.com/rss/r20/fn_realnews_finance.xml
+      weight: 1.0
+      region: KR
+    - name: 연합 마켓
+      url: https://www.yna.co.kr/rss/market.xml
+      weight: 1.0
+      region: KR
+    - name: 연합 경제
+      url: https://www.yna.co.kr/rss/economy.xml
+      weight: 1.0
+      region: KR
+    - name: 연합 세계
+      url: https://www.yna.co.kr/rss/international.xml
+      weight: 1.0
+      region: KR
+    - name: 조선 경제
+      url: https://www.chosun.com/arc/outboundfeeds/rss/category/economy/?outputType=xml
+      weight: 1.0
+      region: KR
+    - name: 조선 국제
+      url: https://www.chosun.com/arc/outboundfeeds/rss/category/international/?outputType=xml
+      weight: 1.0
+      region: KR
+    - name: 동아 경제
+      url: https://rss.donga.com/economy.xml
+      weight: 1.0
+      region: KR
+    - name: 동아 국제
+      url: https://rss.donga.com/international.xml
+      weight: 1.0
+      region: KR
+    - name: 한겨레 경제
+      url: https://www.hani.co.kr/rss/economy/
+      weight: 1.0
+      region: KR
+    - name: 한겨레 국제
+      url: https://www.hani.co.kr/rss/international/
+      weight: 1.0
+      region: KR
+    - name: 경향 경제
+      url: http://www.khan.co.kr/rss/rssdata/economy_news.xml
+      weight: 1.0
+      region: KR
+    - name: 경향 국제
+      url: http://www.khan.co.kr/rss/rssdata/kh_world.xml
+      weight: 1.0
+      region: KR
+    - name: 금융위원회 보도자료
+      url: http://www.fsc.go.kr/about/fsc_bbs_rss/?fid=0111
+      weight: 1.0
+      region: KR
+    - name: Fed Press Releases (all)
+      url: https://www.federalreserve.gov/feeds/press_all.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: Fed Speeches & Testimony
+      url: https://www.federalreserve.gov/feeds/speeches.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: BBC Business (UK edition)
+      url: http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/business/rss.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: BBC World (UK edition)
+      url: http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/world/rss.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: Investing.com - All News
+      url: https://www.investing.com/rss/news.rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Investing.com - Stock Market News
+      url: https://www.investing.com/rss/news_25.rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Reuters.com - Financial News
+      url: https://ir.thomsonreuters.com/rss/news-releases.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: Nasdaq - Markets
+      url: https://www.nasdaq.com/feed/rssoutbound?category=Markets
+      weight: 1.0
+      region: GLOBAL
+    - name: New York Times - World
+      url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: New York Times - Business
+      url: https://rss.nytimes.com/services/xml/rss/nyt/Business.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: Google
+      url: https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko
+      weight: 1.0
+      region: GLOBAL
+    - name: Bloomberg - Market
+      url: https://feeds.bloomberg.com/markets/news.rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Bloomberg - Economy
+      url: https://feeds.bloomberg.com/economics/news.rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Financial Times - World
+      url: https://www.ft.com/world?format=rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Financial Times - Market
+      url: https://www.ft.com/markets?format=rss
+      weight: 1.0
+      region: GLOBAL
+    - name: Wall Street Journal - World
+      url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: Wall Street Journal - Market
+      url: https://feeds.a.dj.com/rss/RSSMarketsMain.xml
+      weight: 1.0
+      region: GLOBAL
+    - name: CNBC
+      url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+      weight: 1.0
+      region: GLOBAL
+    - name: MarketWatch
+      url: https://feeds.content.dowjones.io/public/rss/mw_topstories
+      weight: 1.0
+      region: GLOBAL
+
   region_quota:
     KR: 35
     GLOBAL: 25
+
   min_global_share: 0.35
+
   brief_top_n: 28
   brief_region_quota:
     KR: 14
     GLOBAL: 14
   brief_bonus: 0.25
   description_max_chars: 500
+
 news_scoring:
   time_decay:
     enabled: true
     half_life_hours: 10
     min_multiplier: 0.5
     max_multiplier: 1.0
+
   cluster_boost:
     source_diversity_beta: 0.25
     source_diversity_cap: 1.0
@@ -208,247 +213,289 @@ news_scoring:
     method: log
     alpha: 0.35
     cap: 1.5
+
   keywords:
-    cpi: 2.6
-    ppi: 1.8
-    inflation: 2.2
-    payroll: 2.0
-    jobs: 1.2
-    fed: 2.4
-    fomc: 2.8
-    rate: 1.5
-    yield: 1.6
-    treasury: 1.3
-    ecb: 1.9
-    boj: 1.9
-    pboc: 1.7
-    tariff: 2.2
-    trade: 1.2
-    sanction: 1.6
-    oil: 1.6
-    wti: 1.2
-    brent: 1.2
-    opec: 1.5
-    dxy: 1.2
+    cpi: 1.0
+    ppi: 1.0
+    inflation: 1.0
+    payroll: 1.0
+    jobs: 1.0
+    fed: 1.0
+    fomc: 1.0
+    rate: 1.0
+    yield: 1.0
+    treasury: 1.0
+    ecb: 1.0
+    boj: 1.0
+    pboc: 1.0
+    tariff: 1.0
+    trade: 1.0
+    sanction: 1.0
+    oil: 1.0
+    wti: 1.0
+    brent: 1.0
+    opec: 1.0
+    dxy: 1.0
     d: 0.0
-    dollar: 1.1
+    dollar: 1.0
     fx: 1.0
-    korea: 1.6
-    south korea: 1.8
-    won: 1.3
-    krw: 1.3
-    물가: 2.0
-    인플레이션: 2.2
-    금리: 1.6
-    환율: 1.8
-    관세: 2.2
-    무역: 1.2
-    유가: 1.4
-    원유: 1.2
-    수출: 1.3
-    반도체: 1.3
-    ai: 1.1
-    한국은행: 1.8
-    한은: 1.8
-    kdi: 1.3
+    korea: 1.0
+    south korea: 1.0
+    won: 1.0
+    krw: 1.0
+    물가: 1.0
+    인플레이션: 1.0
+    금리: 1.0
+    환율: 1.0
+    관세: 1.0
+    무역: 1.0
+    유가: 1.0
+    원유: 1.0
+    수출: 1.0
+    반도체: 1.0
+    ai: 1.0
+    한국은행: 1.0
+    한은: 1.0
+    kdi: 1.0
+
   tag_rules:
     MACRO:
-    - cpi
-    - ppi
-    - inflation
-    - payroll
-    - jobs
-    - fed
-    - fomc
-    - ecb
-    - boj
-    - pboc
-    - rate
-    - yield
-    - 물가
-    - 인플레이션
-    - 금리
-    - 환율
-    - 관세
-    - 무역
-    - 한국은행
-    - 한은
-    - kdi
+      - cpi
+      - ppi
+      - inflation
+      - payroll
+      - jobs
+      - fed
+      - fomc
+      - ecb
+      - boj
+      - pboc
+      - rate
+      - yield
+      - 물가
+      - 인플레이션
+      - 금리
+      - 환율
+      - 관세
+      - 무역
+      - 한국은행
+      - 한은
+      - kdi
     ENERGY:
-    - oil
-    - wti
-    - brent
-    - opec
-    - 유가
-    - 원유
+      - oil
+      - wti
+      - brent
+      - opec
+      - 유가
+      - 원유
     FX:
-    - dxy
-    - dollar
-    - fx
-    - won
-    - krw
-    - 환율
+      - dxy
+      - dollar
+      - fx
+      - won
+      - krw
+      - 환율
     KOREA:
-    - korea
-    - south korea
-    - 한국
-    - 코스피
-    - 코스닥
-    - 원화
-    - krw
-    - won
+      - korea
+      - south korea
+      - 한국
+      - 코스피
+      - 코스닥
+      - 원화
+      - krw
+      - won
     SEMIS_AI:
-    - semiconductor
-    - chip
-    - ai
-    - 반도체
-    - ai
+      - semiconductor
+      - chip
+      - ai
+      - 반도체
+      - ai
+
   penalty_patterns:
-  - pattern: \bFY\d{2}\b
-    penalty: 2.0
-  - pattern: \b(net profit|revenue|eps|earnings|quarter|q[1-4])\b
-    penalty: 1.8
-  - pattern: \b(stock gains|shares rise|shares fall)\b
-    penalty: 1.2
-  - pattern: \b(approval of application|enforcement action)\b
-    penalty: 1.5
+    - pattern: \bFY\d{2}\b
+      penalty: 2.0
+    - pattern: \b(net profit|revenue|eps|earnings|quarter|q[1-4])\b
+      penalty: 1.8
+    - pattern: \b(stock gains|shares rise|shares fall)\b
+      penalty: 1.2
+    - pattern: \b(approval of application|enforcement action)\b
+      penalty: 1.5
+
   penalty_exceptions:
-  - nvidia
-  - apple
-  - microsoft
-  - amazon
-  - alphabet
-  - meta
-  - tesla
-  - tsmc
-  - samsung
-  - sk hynix
-  - asml
-  - broadcom
-  - amd
-  - intel
-  - qualcomm
-  - micron
-  - arm
+    - nvidia
+    - apple
+    - microsoft
+    - amazon
+    - alphabet
+    - meta
+    - tesla
+    - tsmc
+    - samsung
+    - sk hynix
+    - asml
+    - broadcom
+    - amd
+    - intel
+    - qualcomm
+    - micron
+    - arm
+
 market:
   sectors_krx:
     enabled: true
-    market: KOSPI         # KOSPI 또는 KOSDAQ
+    market: KOSPI
     lookback_days: 14
     top_k: 4
     bottom_k: 4
+
   flows_krx:
     enabled: true
     window:
-      start_hhmm: "1830"   # 18:05부터 허용 (18:00 이후 안정화 고려)
-      end_hhmm: "0900"     # 09:00 이전까지 허용
+      start_hhmm: "1830"
+      end_hhmm: "0900"
     tops:
       top_k: 5
       investors: ["외국인", "기관합계", "개인"]
       include_price: true
+
   enabled: true
   source: yfinance
   history_days: 90
+  intraday_interval: 5m
+
   assets:
-  - name: KOSPI
-    ticker: ^KS11
-  - name: KOSDAQ
-    ticker: ^KQ11
-  - name: Dow Jones
-    ticker: ^DJI
-  - name: S&P500
-    ticker: ^GSPC
-  - name: NASDAQ
-    ticker: ^IXIC
-  - name: iShares MSCI ACWI
-    ticker: ACWI
-  - name: iShares MSCI World
-    ticker: URTH
-  - name: iShares MSCI EM
-    ticker: EEM
-  - name: USDKRW
-    ticker: KRW=X
-  - name: DXY
-    ticker: DX-Y.NYB
-  - name: WTI
-    ticker: CL=F
-  - name: Gold
-    ticker: GC=F
-  - name: VIX
-    ticker: ^VIX
-  - name: MOVE
-    ticker: ^MOVE  
-  - name: UST 3M
-    ticker: ^IRX
-    kind: yield
-  - name: UST 5Y
-    ticker: ^FVX
-    kind: yield
-  - name: UST 10Y
-    ticker: ^TNX
-    kind: yield
-  - name: UST 30Y
-    ticker: ^TYX
-    kind: yield
+    - name: KOSPI
+      ticker: ^KS11
+    - name: KOSDAQ
+      ticker: ^KQ11
+    - name: Dow Jones
+      ticker: ^DJI
+    - name: S&P500
+      ticker: ^GSPC
+    - name: NASDAQ
+      ticker: ^IXIC
+    - name: iShares MSCI ACWI
+      ticker: ACWI
+    - name: iShares MSCI World
+      ticker: URTH
+    - name: iShares MSCI EM
+      ticker: EEM
+    - name: USDKRW
+      ticker: KRW=X
+    - name: DXY
+      ticker: DX-Y.NYB
+    - name: WTI
+      ticker: CL=F
+    - name: Gold
+      ticker: GC=F
+    - name: VIX
+      ticker: ^VIX
+    - name: MOVE
+      ticker: ^MOVE
+    - name: UST 3M
+      ticker: ^IRX
+      kind: yield
+    - name: UST 5Y
+      ticker: ^FVX
+      kind: yield
+    - name: UST 10Y
+      ticker: ^TNX
+      kind: yield
+    - name: UST 30Y
+      ticker: ^TYX
+      kind: yield
+
 llm:
   enabled: true
   model: gpt-4o-mini
   max_output_tokens: 7000
   temperature: 0.0
+
   style:
     tone: sell-side quant morning note
     bullets_max: 7
     avoid_quotes: true
     speculation_label: 추정
+
   guardrails:
     require_sources: true
     forbid_verbatim_title_copy: true
-  narrative:
-    model: gpt-4o-mini
-    temperature: 0.2
-    max_output_tokens: 1400
-    kr_k: 10
-    gl_k: 10
+
   story_model: gpt-5-mini
+  story_fallback_model: gpt-4o-mini
+  story_editor_model: gpt-4o-mini
   story_temperature: 0.15
+  story_editor_temperature: 0.10
   story_max_output_tokens: 3200
+  story_editor_max_output_tokens: 3200
+
 render:
   markdown: true
-  excel: true
+  excel: false
   story: true
+
 nlp:
   market_filter:
     enabled: true
     mode: balanced
     keep_min_score: 2.8
     keep_sources: []
-  echo:
-    enabled: true
-    weight: 0.35
-    source_weight: 0.15
+
   semantic_cluster:
     enabled: true
     embedding_model: text-embedding-3-small
     distance_threshold: 0.18
     min_text_chars: 30
     text_max_chars: 1200
+    batch_size: 64
+
   cluster_tagging:
     enabled: true
     top_k_titles: 10
     model: gpt-4o-mini
     temperature: 0.1
-    max_output_tokens: 800    
+    max_output_tokens: 800
+
 story:
   kr_items: 30
   global_items: 26
+  brief_kr_items: 12
+  brief_gl_items: 12
   max_themes: 7
-  sector_move_threshold: 0.8
-  use_sectors: true
-  mode_auto: true
-  kst_open_hhmm: 09:00
-  kst_close_hhmm: '15:30'
-  fetch_excerpts: true
-  excerpt_top_k: 10
-  excerpt_max_chars: 900
-  min_paragraph: 10
-  min_chars: 4500
+  news_desc_chars: 360
+  sector_topk: 3
+  mover_topk: 5
+
+  kst_open_hhmm: "09:00"
+  kst_close_hhmm: "15:30"
+  us_tz: America/New_York
+  us_open_hhmm: "09:30"
+  us_close_hhmm: "16:00"
+
+  target_chars: 4500
+  min_paragraphs: 5
+  max_paragraphs: 8
+  sentences_per_paragraph: "2-4"
+  enable_editor_pass: true
+  enable_expander_pass: true
+
+telegram:
+  enabled: true
+  bot_token_env: TELEGRAM_BOT_TOKEN
+  chat_id_env: TELEGRAM_CHAT_ID
+  fail_on_error: true
+
+  send_message: true
+  message_file_priority:
+    - report_story.md
+    - report.md
+
+  prepend_title: true
+  title_template: "AI Daily Briefing | {asof} | {run_mode}"
+  max_message_length: 3500
+  disable_web_page_preview: true
+
+  send_story_file: false
+  send_markdown_file: false
+  send_excel_file: false
+  send_fact_pack_file: false
