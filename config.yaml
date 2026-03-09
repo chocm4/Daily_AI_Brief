@@ -197,6 +197,22 @@ rss:
   description_max_chars: 500
 
 news_scoring:
+  event_type_weights:
+    central_bank: 1.2
+    macro_data: 1.0
+    policy: 1.0
+    regulation: 0.7
+    geopolitics: 0.9
+    earnings: 0.7
+    capital_flow: 0.6
+    supply_chain: 0.7
+    credit_liquidity: 1.1
+    mna_deal: 0.4
+    general_market: 0.2
+  impact_scope_weights:
+    market_moving: 1.0
+    sector_moving: 0.5
+    secondary: 0.0
   time_decay:
     enabled: true
     half_life_hours: 10
