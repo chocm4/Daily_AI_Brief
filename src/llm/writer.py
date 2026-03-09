@@ -120,7 +120,9 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
     sys = SYSTEM_PROMPT + """
 추가 규칙:
 - top_drivers는 fact_pack.events_top를 우선 활용해 event 단위로 묶어라.
-- 한국장 관련 포인트에서는 가능하면 market_context.sector_summary, market_context.flow_summary를 먼저 확인해라.
+- 한국장 관련 포인트에서는 market_context.index_summary -> market_context.ficc_summary -> market_context.sector_summary -> market_context.flow_summary -> events_top 순으로 우선 확인해라.
+- 특징 업종은 market_context.sector_summary.feature_sectors를 우선 사용해라.
+- 특징주는 market_context.feature_stocks를 우선 사용해라.
 - 사실과 해석을 섞을 때는 문장 내에서 분리해라. 예: '...로 확인된다. 추정: ...'.
 - 뉴스가 많아도 중요도 낮은 기사 나열은 금지.
 - 출력은 반드시 JSON 1개만.
