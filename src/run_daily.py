@@ -238,7 +238,7 @@ def main():
             tops_cfg = (flows_cfg.get("tops") or {})
             top_k = int(tops_cfg.get("top_k", 5))
             include_price = bool(tops_cfg.get("include_price", True))
-            investors = tops_cfg.get("investors") or ["외국인", "개인"]
+            investors = tops_cfg.get("investors") or ["외국인", "기관합계", "개인"]
 
             krx_flow_tops = {}
             for mkt in ["KOSPI", "KOSDAQ"]:
