@@ -21,42 +21,6 @@ def _get_credentials(cfg: dict) -> tuple[str, str]:
     return token, chat_id
 
 
-def _chunk_text(text: str, max_len: int) -> list[str]:
-    text = (text or "").strip()
-    if not text:
-        return []
-
-    if len(text) <= max_len:
-        return [text]
-
-    chunks = []
-    current = []
-
-    for line in text.splitlines(keepends=True):
-        candidate = "".join(current) + line
-        if len(candidate) <= max_len:
-            current.append(line)
-            continue
-
-        if current:
-            chunks.append("".join(current).strip())
-            current = []
-
-        if len(line) <= max_len:
-            current.append(line)
-            continue
-
-        start = 0
-        while start < len(line):
-            chunks.append(line[start:start + max_len].strip())
-            start += max_len
-
-    if current:
-        chunks.append("".join(current).strip())
-
-    return [c for c in chunks if c]
-
-
 def _read_first_existing(base_dir: Path, filenames: list[str]) -> tuple[str | None, Path | None]:
     for name in filenames:
         p = base_dir / name
@@ -80,30 +44,68 @@ def _post_document(url: str, file_path: Path, data: dict, timeout: int = 60) -> 
     return resp.json()
 
 
+def _truncate_one_message(text: str, max_len: int, suffix: str = "\n\n...(truncated)") -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    if len(text) <= max_len:
+        return text
+
+    suffix = suffix or ""
+    allowed = max_len - len(suffix)
+    if allowed <= 0:
+        return text[:max_len]
+
+    cut = text[:allowed]
+
+    # 문단/줄 경계에서 최대한 자연스럽게 자르기
+    candidates = [
+        cut.rfind("\n## "),
+        cut.rfind("\n### "),
+        cut.rfind("\n\n"),
+        cut.rfind("\n"),
+        cut.rfind(". "),
+        cut.rfind("."),
+    ]
+    best = max(candidates)
+
+    if best >= int(max_len * 0.6):
+        cut = cut[:best].rstrip()
+
+    return cut.rstrip() + suffix
+
+
 def send_message(text: str, cfg: dict, log=None):
     token, chat_id = _get_credentials(cfg)
     tg_cfg = cfg.get("telegram", {}) or {}
     max_len = int(tg_cfg.get("max_message_length", 3500))
     disable_preview = bool(tg_cfg.get("disable_web_page_preview", True))
+    single_message_only = bool(tg_cfg.get("single_message_only", True))
+    truncate_suffix = str(tg_cfg.get("truncate_suffix", "\n\n...(truncated)"))
 
-    chunks = _chunk_text(text, max_len=max_len)
-    if not chunks:
+    final_text = (text or "").strip()
+    if not final_text:
         if log:
             log.info("Telegram message skipped: empty text")
         return
 
-    url = f"{TELEGRAM_API_BASE}/bot{token}/sendMessage"
+    if single_message_only:
+        final_text = _truncate_one_message(final_text, max_len=max_len, suffix=truncate_suffix)
 
-    for chunk in chunks:
-        payload = {
-            "chat_id": chat_id,
-            "text": chunk,
-            "disable_web_page_preview": disable_preview,
-        }
-        _post_json(url, payload)
+    url = f"{TELEGRAM_API_BASE}/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": final_text,
+        "disable_web_page_preview": disable_preview,
+    }
+    _post_json(url, payload)
 
     if log:
-        log.info(f"Telegram message sent ({len(chunks)} chunk(s))")
+        msg = f"Telegram message sent (single message, len={len(final_text)})"
+        if len((text or "").strip()) > len(final_text):
+            msg += " [truncated]"
+        log.info(msg)
 
 
 def send_document(file_path: Path, caption: str, cfg: dict, log=None):
