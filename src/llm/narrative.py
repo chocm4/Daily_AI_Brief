@@ -36,6 +36,74 @@ def _truncate(s: str, max_chars: int) -> str:
     return s
 
 
+def _strip_sources_section(md: str) -> str:
+    if not md:
+        return ""
+    lines = md.splitlines()
+    cut_idx = None
+
+    for i, line in enumerate(lines):
+        if line.strip().lower() in {"## sources", "### sources"}:
+            cut_idx = i
+            break
+
+    if cut_idx is None:
+        return md.strip()
+
+    return "\n".join(lines[:cut_idx]).rstrip()
+
+
+def _top_scored_sources(news_kr: list, news_gl: list, top_k: int = 5) -> list:
+    pool = []
+    seen = set()
+
+    for x in (news_kr or []) + (news_gl or []):
+        key = (
+            str(x.get("id", "")).strip(),
+            str(x.get("title", "")).strip(),
+            str(x.get("link", "") or x.get("url", "")).strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(x)
+
+    def _score(item):
+        v = item.get("score")
+        try:
+            return float(v)
+        except Exception:
+            return float("-inf")
+
+    pool = sorted(pool, key=_score, reverse=True)
+    return pool[:top_k]
+
+
+def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
+    top_sources = _top_scored_sources(news_kr, news_gl, top_k=top_k)
+    lines = ["## Sources"]
+
+    if not top_sources:
+        lines.append("- 없음")
+        return "\n".join(lines)
+
+    for x in top_sources:
+        nid = x.get("id", "")
+        title = x.get("title", "")
+        source = x.get("source", "")
+        link = x.get("link", "") or x.get("url", "")
+        score = x.get("score", "")
+
+        try:
+            score_txt = f"{float(score):.2f}"
+        except Exception:
+            score_txt = str(score) if score not in [None, ""] else "N/A"
+
+        lines.append(f"- ({nid}) {title} | {source} | score={score_txt} | {link}")
+
+    return "\n".join(lines)
+
+
 def _format_market_snapshot(market: List[Dict[str, Any]]) -> Dict[str, Any]:
     out = {}
     for row in market or []:
@@ -98,7 +166,6 @@ def _mode_guidance(mode: str) -> str:
             "다음 거래일 시나리오(상방/하방 트리거)를 제시해라."
         )
 
-    # fallback
     return (
         "현재는 일반 구간. "
         "한국/미국 시장의 최근 흐름을 연결해 핵심 이벤트와 다음 세션의 체크포인트를 정리해라."
@@ -106,7 +173,7 @@ def _mode_guidance(mode: str) -> str:
 
 
 # -----------------------------
-# news packing (IMPORTANT: include description+link for depth)
+# news packing
 # -----------------------------
 def _clip_news(items: list, n: int, desc_chars: int = 360) -> list:
     out = []
@@ -129,15 +196,9 @@ def _clip_news(items: list, n: int, desc_chars: int = 360) -> list:
 
 
 # -----------------------------
-# optional market add-ons: sectors/movers/flows
+# optional market add-ons
 # -----------------------------
 def _sector_highlights(sectors: Optional[List[Dict[str, Any]]], topk: int = 3) -> Dict[str, Any]:
-    """
-    sectors: list of dicts with keys like:
-      - sector/name
-      - ret1d_pct
-      - (optional) net_buy_foreign, net_buy_inst, net_buy_retail
-    """
     sectors = sectors or []
     norm = []
     for s in sectors:
@@ -163,8 +224,6 @@ def _sector_highlights(sectors: Optional[List[Dict[str, Any]]], topk: int = 3) -
 
     rets = [x["ret1d_pct"] for x in norm_sorted]
     dispersion = (max(rets) - min(rets)) if rets else 0.0
-
-    # "특징"이 있는지 판단(너무 억지로 넣지 않기 위함)
     has_feature = dispersion >= 1.5 or abs(leaders[0]["ret1d_pct"]) >= 2.0 or abs(laggards[0]["ret1d_pct"]) >= 2.0
 
     return {
@@ -177,12 +236,6 @@ def _sector_highlights(sectors: Optional[List[Dict[str, Any]]], topk: int = 3) -
 
 
 def _mover_highlights(movers: Optional[List[Dict[str, Any]]], topk: int = 5) -> Dict[str, Any]:
-    """
-    movers: list of dicts with keys like:
-      - name/ticker
-      - ret1d_pct
-      - (optional) net_buy_foreign/net_buy_inst/net_buy_retail
-    """
     movers = movers or []
     norm = []
     for m in movers:
@@ -210,10 +263,6 @@ def _mover_highlights(movers: Optional[List[Dict[str, Any]]], topk: int = 5) -> 
 
 
 def _build_theme_map(news: List[Dict[str, Any]], max_themes: int = 6) -> List[Dict[str, Any]]:
-    """
-    Prefer tags. If tags are empty, fallback to keyword buckets.
-    Output: [{theme: str, ids: [..], count: int}]
-    """
     if not news:
         return []
 
@@ -227,7 +276,6 @@ def _build_theme_map(news: List[Dict[str, Any]], max_themes: int = 6) -> List[Di
                 tag_counter[t] += 1
                 per_tag[t].append(it.get("id"))
         else:
-            # fallback keyword bucket (very light)
             title = (it.get("title") or "") + " " + (it.get("description") or "")
             title = title.lower()
             buckets = []
@@ -254,7 +302,6 @@ def _build_theme_map(news: List[Dict[str, Any]], max_themes: int = 6) -> List[Di
     out = []
     for t in top:
         ids = per_tag.get(t, [])
-        # 중복 제거 유지
         seen = set()
         ids2 = []
         for _id in ids:
@@ -309,11 +356,10 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     max_tokens = int(llm_cfg.get("story_max_output_tokens", 2600))
     editor_max_tokens = int(llm_cfg.get("story_editor_max_output_tokens", max_tokens))
 
-    # length knobs (실제로 분량을 늘리는 핵심)
-    target_chars = int(story_cfg.get("target_chars", 3000))  # 기본 더 길게
+    target_chars = int(story_cfg.get("target_chars", 3000))
     max_paragraphs = int(story_cfg.get("max_paragraphs", 6))
     min_paragraphs = int(story_cfg.get("min_paragraphs", 4))
-    sentences_per_paragraph = story_cfg.get("sentences_per_paragraph", "2-4")  # 문자열로 전달
+    sentences_per_paragraph = story_cfg.get("sentences_per_paragraph", "2-4")
 
     enable_editor_pass = bool(story_cfg.get("enable_editor_pass", True))
     enable_expander_pass = bool(story_cfg.get("enable_expander_pass", True))
@@ -321,17 +367,14 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     mode = fact_pack.get("run_mode") or "AFTERCLOSE"
     guidance = _mode_guidance(mode)
 
-    # news size knobs
     kr_items_n = int(story_cfg.get("kr_items", 28))
     gl_items_n = int(story_cfg.get("global_items", 24))
     desc_chars = int(story_cfg.get("news_desc_chars", 360))
     max_themes = int(story_cfg.get("max_themes", 6))
 
-    # main news
     news_kr = _clip_news(fact_pack.get("news_kr", []) or [], kr_items_n, desc_chars=desc_chars)
     news_gl = _clip_news(fact_pack.get("news_overnight", []) or fact_pack.get("news_global", []) or [], gl_items_n, desc_chars=desc_chars)
 
-    # macro/policy brief
     brief_kr = _clip_news(fact_pack.get("brief_kr", []) or [], int(story_cfg.get("brief_kr_items", 14)), desc_chars=desc_chars)
     brief_gl = _clip_news(fact_pack.get("brief_global", []) or [], int(story_cfg.get("brief_gl_items", 14)), desc_chars=desc_chars)
 
@@ -339,34 +382,29 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     drivers = report.get("top_drivers", []) if isinstance(report, dict) else []
     risks = report.get("risk_radar", []) if isinstance(report, dict) else []
 
-    # sector / movers / flows (optional)
     sector_hl = _sector_highlights(fact_pack.get("kr_sectors"), topk=int(story_cfg.get("sector_topk", 3)))
     mover_hl = _mover_highlights(fact_pack.get("kr_movers"), topk=int(story_cfg.get("mover_topk", 5)))
 
-    # themes
     theme_map_kr = _build_theme_map(news_kr, max_themes=max_themes)
     theme_map_gl = _build_theme_map(news_gl, max_themes=max_themes)
 
-    # investor flows (optional): keep it compact for context
     krx_flows = fact_pack.get("krx_flows") or {}
     krx_flows_compact = {}
     for mkt in ["KOSPI", "KOSDAQ"]:
         p = krx_flows.get(mkt) or {}
         nb = (p.get("net_buy_1e8krw") or {})
         if nb:
-            # 대표 키(있으면)만 우선 포함
             keep = {}
             for k in ["외국인", "기관합계", "개인", "기타법인", "금융투자", "연기금"]:
                 if k in nb:
                     keep[k] = nb[k]
-            # 혹시 대표 키가 하나도 없으면 그냥 일부만
             if not keep:
                 keep = dict(list(nb.items())[:6])
             krx_flows_compact[mkt] = {
                 "date": p.get("date"),
                 "net_buy_1e8krw": keep,
             }
-            
+
     context = {
         "asof": fact_pack.get("asof"),
         "generated_at_kst": fact_pack.get("generated_at_kst"),
@@ -435,9 +473,9 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 
 [출처 표기(중요)]
 - 본문에 [Nxx] 같은 표기는 쓰지 마라.
-- 글 마지막에 "## Sources" 섹션을 만들고, 실제로 본문에서 사용한 뉴스만
-  "- (ID) 제목 | 매체 | 링크" 형식으로 나열해라.
-- 링크는 컨텍스트에 있는 link만 사용해라(새 링크 생성 금지).
+- 글 마지막에 "## Sources" 섹션을 직접 작성하지 마라.
+- 출처 목록은 후처리 코드가 별도로 붙인다.
+- 링크는 본문에 굳이 반복하지 마라.
 
 [문체]
 - 증권사 시황 톤(중립적/단정 피하기: "~로 해석", "~가능성", "~에 주목").
@@ -448,7 +486,6 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 
     client = OpenAI()
 
-    # 1) draft
     try:
         draft, model_used, usage = _responses_call(
             client, model, sys_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens
@@ -465,7 +502,6 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 
     txt = (draft or "").strip()
 
-    # 2) editor pass: 연결성/문체 다듬기(새 사실 추가 금지)
     if enable_editor_pass and txt:
         editor_sys = """
 너는 한국 sell-side 리서치센터의 '에디터'다.
@@ -476,7 +512,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - 컨텍스트 밖 정보를 추론해 단정하지 마라.
 - 논리 전개를 더 명확히(원인→경로→결과), 문단 연결 문장을 강화해라.
 - 반복/나열을 줄이고, 문장 구조를 성숙하게 바꿔라(학생 느낌 제거).
-- "## Sources" 섹션은 유지하되, 본문에서 실제로 언급한 항목만 남겨라.
+- "## Sources" 섹션은 수정하거나 새로 만들지 마라.
 """
         editor_user = "초안:\n```text\n" + txt + "\n```"
 
@@ -492,7 +528,6 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
             if log:
                 log.warning(f"editor pass failed: {e}")
 
-    # 3) expander pass: 분량이 부족하면 ‘근거(description) 기반으로’ 확장
     if enable_expander_pass and txt and len(txt) < int(target_chars * 0.9):
         exp_sys = """
 너는 한국 sell-side 리서치센터의 '확장 편집자'다.
@@ -502,7 +537,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - 새 사실/새 수치/새 일정 추가 금지.
 - '왜 그 뉴스가 시장에 영향을 줬는지'를 경로(금리→밸류에이션→업종/스타일, 유가→인플레→금리 기대 등)로 설명을 보강해라.
 - 문단 사이 연결을 더 강화해라.
-- "## Sources"는 유지.
+- "## Sources" 섹션은 건드리지 마라.
 """
         exp_user = (
             "확장 대상 글:\n```text\n" + txt + "\n```\n\n"
@@ -537,5 +572,12 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 
     asof = fact_pack.get("asof") or ""
     gen = fact_pack.get("generated_at_kst") or ""
-    header = f"# Daily Market Review (as of {asof})\n\n" + (f"> generated_at_kst: {gen} | mode: {mode}\n\n" if gen else "")
-    return header + (txt or "").strip() + "\n"
+
+    header = f"# Daily Market Review (as of {asof})\n\n"
+    if gen:
+        header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
+
+    body = _strip_sources_section((txt or "").strip())
+    sources_md = _render_sources_md(news_kr, news_gl, top_k=5)
+
+    return header + body + "\n\n" + sources_md + "\n"
