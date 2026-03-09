@@ -24,7 +24,7 @@ def _fmt_bp(v) -> str:
     return f"{v:+.1f}bp"
 
 
-def _find_asset(market: List[Dict[str, Any]], name: str) -> Dict[str, Any] | None:
+def _find_asset(market: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
     for x in market or []:
         nm = x.get("name") or x.get("asset")
         if nm == name:
@@ -32,7 +32,7 @@ def _find_asset(market: List[Dict[str, Any]], name: str) -> Dict[str, Any] | Non
     return None
 
 
-def _asset_brief(row: Dict[str, Any] | None) -> Dict[str, Any] | None:
+def _asset_brief(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
         return None
 
@@ -168,7 +168,7 @@ def _infer_market_flags(benchmarks: Dict[str, Any], sector_summary: Dict[str, An
     return flags
 
 
-def _build_sector_summary(sectors_kr: List[Dict[str, Any]] | None) -> Dict[str, Any]:
+def _build_sector_summary(sectors_kr: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
     sectors_kr = sectors_kr or []
     ordered = sorted(
         [x for x in sectors_kr if x.get("ret1d_pct") is not None],
@@ -184,13 +184,22 @@ def _build_sector_summary(sectors_kr: List[Dict[str, Any]] | None) -> Dict[str, 
     dispersion = round(float(ordered[0]["ret1d_pct"]) - float(ordered[-1]["ret1d_pct"]), 2)
 
     feature_sectors = []
-    for x in leaders[:2] + laggards[:2]:
+    for x in leaders[:2]:
         feature_sectors.append(
             {
                 "name": x.get("name"),
                 "ret1d_pct": float(x.get("ret1d_pct")),
-                "direction": "leader" if float(x.get("ret1d_pct")) >= 0 else "laggard",
-                "comment_hint": "상대강도 상위 업종" if float(x.get("ret1d_pct")) >= 0 else "상대약세 업종",
+                "direction": "leader",
+                "comment_hint": "상대강도 상위 업종",
+            }
+        )
+    for x in laggards[:2]:
+        feature_sectors.append(
+            {
+                "name": x.get("name"),
+                "ret1d_pct": float(x.get("ret1d_pct")),
+                "direction": "laggard",
+                "comment_hint": "상대약세 업종",
             }
         )
 
@@ -202,26 +211,27 @@ def _build_sector_summary(sectors_kr: List[Dict[str, Any]] | None) -> Dict[str, 
     }
 
 
-def _normalize_top_list(items: List[Dict[str, Any]] | None, investor: str) -> List[Dict[str, Any]]:
+def _normalize_top_list(items: Optional[List[Dict[str, Any]]], investor: str) -> List[Dict[str, Any]]:
     out = []
     for x in items or []:
-        row = {
-            "investor": investor,
-            "ticker": x.get("ticker"),
-            "name": x.get("name"),
-            "ret1d_pct": _to_float(x.get("ret1d_pct")),
-            "close": x.get("close"),
-            "unit": x.get("unit"),
-            "net_buy_1e8krw": x.get("net_buy_1e8krw"),
-            "net_buy_shares": x.get("net_buy_shares"),
-        }
-        out.append(row)
+        out.append(
+            {
+                "investor": investor,
+                "ticker": x.get("ticker"),
+                "name": x.get("name"),
+                "ret1d_pct": _to_float(x.get("ret1d_pct")),
+                "close": x.get("close"),
+                "unit": x.get("unit"),
+                "net_buy_1e8krw": _to_float(x.get("net_buy_1e8krw")),
+                "net_buy_shares": _to_float(x.get("net_buy_shares")),
+            }
+        )
     return out
 
 
 def _build_flow_summary(
-    krx_flows: Dict[str, Any] | None,
-    krx_flow_tops: Dict[str, Any] | None,
+    krx_flows: Optional[Dict[str, Any]],
+    krx_flow_tops: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     krx_flows = krx_flows or {}
     krx_flow_tops = krx_flow_tops or {}
@@ -234,9 +244,9 @@ def _build_flow_summary(
         if not net:
             continue
 
-        foreign = net.get("외국인")
-        inst = net.get("기관합계")
-        retail = net.get("개인")
+        foreign = _to_float(net.get("외국인"))
+        inst = _to_float(net.get("기관합계"))
+        retail = _to_float(net.get("개인"))
 
         abs_rank = sorted(
             [
@@ -301,10 +311,10 @@ def _build_feature_stocks(flow_summary: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def build_market_context(
-    market: List[Dict[str, Any]] | None,
-    sectors_kr: List[Dict[str, Any]] | None = None,
-    krx_flows: Dict[str, Any] | None = None,
-    krx_flow_tops: Dict[str, Any] | None = None,
+    market: Optional[List[Dict[str, Any]]],
+    sectors_kr: Optional[List[Dict[str, Any]]] = None,
+    krx_flows: Optional[Dict[str, Any]] = None,
+    krx_flow_tops: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     market = market or []
 
