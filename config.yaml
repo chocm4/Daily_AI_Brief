@@ -473,6 +473,7 @@ story:
   us_close_hhmm: "16:00"
 
   target_chars: 4500
+  telegram_body_reserve_chars: 120
   min_paragraphs: 5
   max_paragraphs: 8
   sentences_per_paragraph: "2-4"
@@ -502,5 +503,6 @@ telegram:
   send_markdown_file: false
   send_excel_file: false
   send_fact_pack_file: false
+
 
 
