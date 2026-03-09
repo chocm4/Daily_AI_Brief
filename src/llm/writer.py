@@ -114,7 +114,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
     client = OpenAI(api_key=api_key)
 
     llm_cfg = cfg.get("llm", {}) or {}
-    model = llm_cfg.get("model", "gpt-4o-mini")
+    model = llm_cfg.get("model", "gpt-5.4")
     temperature = float(llm_cfg.get("temperature", 0.2))
     max_out = int(llm_cfg.get("max_output_tokens", 2600))
 
@@ -179,3 +179,4 @@ JSON 외 텍스트 금지.
         d2 = _safe_json_load(text2)
         d2 = _normalize(d2, fact_pack)
         return DailyBriefing.model_validate(d2)
+
