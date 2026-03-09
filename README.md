@@ -1,14 +1,19 @@
-# Daily Briefing AI (RSS-only MVP)
+# AI Daily Briefing
 
-**Goal:** Generate a daily market briefing draft using **RSS headlines** + your own market data, with a clean-room workflow.
+RSS / 시장데이터 / LLM을 결합해서 일중 시황 초안을 만들고, GitHub Actions로 정해진 시각에 텔레그램으로 자동 전송하는 프로젝트입니다.
 
-- No web scraping of full articles by default
-- Stores only RSS metadata (title/time/link) unless you explicitly enable snippets
-- Uses the OpenAI Responses API + Structured Outputs (Pydantic) for reliable JSON output
+## 동작 개요
 
-## 1) Quick start
+1. RSS 수집
+2. 정규화 / 중복제거 / 시맨틱 클러스터링
+3. 시장 데이터(yfinance, pykrx) 결합
+4. Fact Pack 생성
+5. LLM 기반 보고서 생성
+6. Markdown / Story Markdown 저장
+7. 텔레그램 전송
 
-### (A) Create venv & install
+## 로컬 실행
+
 ```bash
 python -m venv .venv
 # Windows
@@ -17,41 +22,3 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-```
-
-### (B) Set API key (OpenAI)
-```bash
-# Windows PowerShell
-setx OPENAI_API_KEY "sk-..."
-# macOS/Linux
-export OPENAI_API_KEY="sk-..."
-```
-
-### (C) Edit config
-Open `config.yaml` and replace RSS feed URLs and market tickers.
-
-### (D) Run
-```bash
-python -m src.run_daily
-# or a specific date:
-python -m src.run_daily --date 2026-01-23
-```
-
-Outputs go to `./outputs/YYYY-MM-DD/`.
-
-## 2) Outputs
-- `report.json`  (structured output)
-- `report.md`    (rendered draft)
-- `news.csv`     (normalized headlines, tags, scores)
-- `market.csv`   (optional market snapshot)
-- `fact_pack.json`
-- `report.xlsx`  (optional; minimal clean template)
-
-## 3) Clean-room / copyright notes
-- Default mode does **not** fetch full article text.
-- The model is instructed to **paraphrase**, avoid direct quotes, and attach source IDs.
-
-## 4) Next steps
-- Swap `market` module to your vendor (Quantiwise/FnGuide/FactSet/etc.)
-- Add a calendar module (macro/earnings)
-- Add a rules-based "risk radar" thresholds
