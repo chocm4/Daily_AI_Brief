@@ -495,8 +495,12 @@ telegram:
   max_message_length: 3500
   disable_web_page_preview: true
 
+  single_message_only: true
+  truncate_suffix: "\n\n...(truncated)"
+
   send_story_file: false
   send_markdown_file: false
   send_excel_file: false
   send_fact_pack_file: false
+
 
