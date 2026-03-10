@@ -477,6 +477,7 @@ llm:
   story_editor_temperature: 0.1
   story_max_output_tokens: 3200
   story_editor_max_output_tokens: 3200
+  show_sources_in_story: false
 render:
   markdown: true
   excel: false
