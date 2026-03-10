@@ -18,7 +18,7 @@ Fact Pack에 없는 사실/숫자를 만들지 마라.
 - market_context.sector_summary.feature_sectors가 있으면 특징 업종 수익률을 반드시 숫자와 함께 반영한다.
 - market_context.feature_stocks가 있으면 특징주 수익률 또는 순매수 금액을 반드시 숫자와 함께 반영한다.
 - market_context.flow_summary가 있으면 외국인/기관/개인 수급 추이를 반드시 숫자와 함께 반영한다.
-- 숫자를 넣을 수 있는 문맥에서는 숫자를 빼지 마라.
+- 같은 숫자와 같은 자산명을 같은 섹션 안에서 반복하지 마라.
 """
 
 USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아니라 '애널리스트형 Daily Market Note'를 작성해라.
@@ -28,7 +28,7 @@ USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아
 
 출력 규칙:
 1) headline: 과장 없는 한 줄 진단. 가능하면 지수/금리/환율 숫자 중 1개 이상 반영.
-2) today_5lines: 정확히 5개. 각 줄은 1~2문장. 각 줄에 가능하면 숫자 1개 이상 포함.
+2) today_5lines: 정확히 5개. 각 줄은 1~2문장. 가급적 각 줄에 숫자 1개 이상 포함.
 3) kr_bullets: 7~10개. KOSPI/KOSDAQ, 특징 업종, 수급, 특징주, 국내 뉴스/이벤트를 숫자와 함께 최대한 반영. 각 불릿 끝에 [근거] 필수.
 4) overnight_bullets: 7~10개. S&P500/NASDAQ, UST 10Y/DXY/USDKRW, 해외 이벤트와 한국 증시 연결을 숫자와 함께 반영. 각 불릿 끝에 [근거] 필수.
 5) price_action: 10~14개. move/evidence는 반드시 숫자를 포함한 문자열.
@@ -36,6 +36,11 @@ USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아
 7) risk_radar: fact_pack.risk_radar_rules를 그대로 옮긴다.
 8) tomorrow_watch: 5~8개.
 9) disclaimer: 'RSS 헤드라인 및 공개 데이터 기반의 자동 작성 초안' 포함.
+
+스타일 제약:
+- 같은 자산의 같은 숫자를 여러 섹션에서 반복하지 마라.
+- 이미 headline/today_5lines에서 쓴 숫자는 kr_bullets와 overnight_bullets에서 필요할 때만 재사용하라.
+- 해석은 숫자 바로 뒤에 붙여라. 숫자만 나열하지 마라.
 
 출력은 반드시 DailyBriefing 스키마에 맞는 JSON만 출력한다. 반드시 한국어로 작성한다.
 """
