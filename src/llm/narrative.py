@@ -1,8 +1,16 @@
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from openai import OpenAI
+
+
+MARKET_KEYS = [
+    "KOSPI", "KOSDAQ", "코스피", "코스닥",
+    "원/달러", "USDKRW", "환율",
+    "미국 10년물", "UST 10Y",
+    "S&P500", "NASDAQ", "나스닥", "VIX", "WTI"
+]
 
 
 def _to_float(x):
@@ -28,7 +36,7 @@ def _fmt_bp(v) -> str:
     return f"{v:+.1f}bp"
 
 
-def _benchmark(fact_pack: Dict[str, Any], name: str) -> Dict[str, Any] | None:
+def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
     mc = fact_pack.get("market_context") or {}
     bench = (mc.get("benchmark_summary") or {}).get(name)
     if bench:
@@ -70,6 +78,9 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
             "style_flags": mc.get("style_flags") or [],
         },
         "events_top": fact_pack.get("events_top") or [],
+        "news_kr": fact_pack.get("news_kr") or [],
+        "news_global": fact_pack.get("news_global") or [],
+        "news_overnight": fact_pack.get("news_overnight") or [],
     }
 
 
@@ -116,32 +127,104 @@ def _split_sentences(text: str) -> List[str]:
     text = (text or "").strip()
     if not text:
         return []
-    raw = re.split(r'(?<=[.!?])\s+|(?<=다\.)\s+|(?<=다)\s+', text)
+
+    # '다'에서 무조건 자르지 말고, 종결형 '다.' 중심으로만 분리
+    parts = re.split(r'(?<=[.!?])\s+|(?<=다\.)\s+|(?<=다!)\s+|(?<=다\?)\s+', text)
     out = []
-    for x in raw:
+    for x in parts:
         x = x.strip()
         if x:
             out.append(x)
     return out
 
 
-def _drop_duplicate_market_sentence(sentences: List[str], opening: str) -> List[str]:
+def _extract_number_signals(s: str) -> List[str]:
+    s = s or ""
+    patterns = [
+        r'[+-]?\d+(?:,\d{3})*(?:\.\d+)?%',
+        r'[+-]?\d+(?:,\d{3})*(?:\.\d+)?bp',
+        r'\d+(?:,\d{3})*(?:\.\d+)?원',
+        r'\d+(?:,\d{3})*(?:\.\d+)?달러',
+        r'\d+(?:,\d{3})*(?:\.\d+)?',
+    ]
+    found = []
+    for p in patterns:
+        found.extend(re.findall(p, s))
+    return found
+
+
+def _mentioned_market_keys(s: str) -> List[str]:
+    s = s or ""
+    found = []
+    for k in MARKET_KEYS:
+        if k in s:
+            found.append(k)
+    return found
+
+
+def _normalize_for_overlap(s: str) -> str:
+    s = (s or "").strip()
+    s = re.sub(r'\s+', ' ', s)
+    s = re.sub(r'[“”"\'‘’()\[\]{}]', '', s)
+    return s.lower()
+
+
+def _is_opening_duplicate_sentence(s: str, opening: str) -> bool:
+    if not s.strip():
+        return False
+
+    s_keys = set(_mentioned_market_keys(s))
+    o_keys = set(_mentioned_market_keys(opening))
+    common_keys = s_keys.intersection(o_keys)
+
+    nums = _extract_number_signals(s)
+
+    # 케이스 1: opening과 같은 시장 숫자 문장을 다시 쓰는 경우
+    if len(common_keys) >= 2 and len(nums) >= 2:
+        return True
+
+    # 케이스 2: opening과 매우 비슷한 자산군 조합 + 수익률 서술
+    market_like = any(k in s for k in ["KOSPI", "KOSDAQ", "코스피", "코스닥", "원/달러", "환율", "S&P500", "NASDAQ"])
+    perf_like = "%" in s or "bp" in s
+    if market_like and perf_like and len(common_keys) >= 1 and len(nums) >= 3:
+        return True
+
+    # 케이스 3: 문장 내용 자체가 opening을 거의 재진술
+    ns = _normalize_for_overlap(s)
+    no = _normalize_for_overlap(opening)
+    if ns and no:
+        overlap_hits = 0
+        for token in ["kospi", "kosdaq", "원/달러", "s&p500", "nasdaq", "%", "bp", "기록했다", "수준이 확인됐다"]:
+            if token in ns and token in no:
+                overlap_hits += 1
+        if overlap_hits >= 3 and len(nums) >= 2:
+            return True
+
+    return False
+
+
+def _drop_duplicate_market_sentences(sentences: List[str], opening: str) -> List[str]:
     if not sentences:
         return sentences
 
-    opening_keys = [
-        k for k in ["KOSPI", "KOSDAQ", "원/달러", "USDKRW", "미국 10년물", "S&P500", "NASDAQ"]
-        if k in opening
-    ]
-
     filtered = []
+    dropped_first_duplicate = False
+
     for i, s in enumerate(sentences):
-        if i == 0:
-            has_market_key = sum(1 for k in opening_keys if k in s) >= 3
-            has_pct = "%" in s or "bp" in s
-            if has_market_key and has_pct:
+        # 본문 초반 2문장까지는 opening 중복을 강하게 제거
+        if i <= 1 and _is_opening_duplicate_sentence(s, opening):
+            dropped_first_duplicate = True
+            continue
+
+        # 첫 중복이 제거된 뒤 바로 이어지는 추가 수익률 나열도 한 번 더 제거
+        if dropped_first_duplicate and i <= 2:
+            keys = _mentioned_market_keys(s)
+            nums = _extract_number_signals(s)
+            if len(keys) >= 2 and len(nums) >= 2 and ("%" in s or "bp" in s):
                 continue
+
         filtered.append(s)
+
     return filtered
 
 
@@ -151,6 +234,8 @@ def _ensure_complete_sentence(s: str) -> str:
         return s
     if s.endswith(("다.", "요.", ".", "!", "?")):
         return s
+    if s.endswith("다"):
+        return s + "."
     return s + "."
 
 
@@ -163,7 +248,15 @@ def _remove_meta_labels(text: str) -> str:
     return text.strip()
 
 
-def _chunk_paragraph(sentences: List[str], target_chars: int = 180, max_chars: int = 240) -> List[str]:
+def _remove_explicit_sources_block(text: str) -> str:
+    if not text:
+        return ""
+    # LLM이 혹시 출처 섹션을 만들어도 잘라냄
+    text = re.split(r'\n##\s*Sources\b|\n##\s*출처\b|\n###\s*Sources\b|\n###\s*출처\b', text)[0]
+    return text.strip()
+
+
+def _chunk_paragraph(sentences: List[str], target_chars: int = 180, max_chars: int = 260) -> List[str]:
     paras = []
     cur = []
     cur_len = 0
@@ -194,7 +287,7 @@ def _chunk_paragraph(sentences: List[str], target_chars: int = 180, max_chars: i
 
 def _clean_body(text: str, opening: str) -> str:
     text = (text or "").strip()
-    text = text.replace("## Sources", "").strip()
+    text = _remove_explicit_sources_block(text)
     text = _remove_meta_labels(text)
     text = re.sub(r'\n{3,}', '\n\n', text)
 
@@ -203,14 +296,91 @@ def _clean_body(text: str, opening: str) -> str:
     for p in raw_paras:
         sentences.extend(_split_sentences(p))
 
-    sentences = _drop_duplicate_market_sentence(sentences, opening)
-    sentences = [_ensure_complete_sentence(x) for x in sentences if x.strip()]
+    sentences = _drop_duplicate_market_sentences(sentences, opening)
 
-    if not sentences:
+    clean_sentences = []
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        # 비정상 분절 최소 보정
+        s = re.sub(r'([가-힣A-Za-z0-9])\.\s+([가-힣])', r'\1 \2', s)
+        s = _ensure_complete_sentence(s)
+        clean_sentences.append(s)
+
+    if not clean_sentences:
         return ""
 
-    paras = _chunk_paragraph(sentences, target_chars=180, max_chars=240)
+    paras = _chunk_paragraph(clean_sentences, target_chars=180, max_chars=260)
     return "\n\n".join(paras[:6]).strip()
+
+
+def _collect_used_source_candidates(fact_pack: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pool = []
+    seen = set()
+
+    candidates = []
+    candidates.extend(fact_pack.get("news_kr", []) or [])
+    candidates.extend(fact_pack.get("news_overnight", []) or [])
+    candidates.extend(fact_pack.get("news_global", []) or [])
+
+    for x in candidates:
+        key = (
+            str(x.get("event_id", "")).strip(),
+            str(x.get("title", "")).strip(),
+            str(x.get("url", "")).strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        pool.append(x)
+
+    def _score(item):
+        try:
+            return float(item.get("score") or 0.0)
+        except Exception:
+            return 0.0
+
+    def _driver_rank(item):
+        try:
+            return int(item.get("driver_rank") or 999)
+        except Exception:
+            return 999
+
+    pool = sorted(
+        pool,
+        key=lambda x: (
+            _driver_rank(x),
+            -_score(x),
+            -(int(x.get("cluster_mentions") or 1)),
+            -(int(x.get("cluster_source_count") or x.get("source_count") or 1)),
+        )
+    )
+    return pool[:5]
+
+
+def _render_reference_articles(fact_pack: Dict[str, Any]) -> str:
+    items = _collect_used_source_candidates(fact_pack)
+    lines = ["## 참고 기사"]
+    if not items:
+        lines.append("- 없음")
+        return "\n".join(lines)
+
+    for x in items:
+        title = x.get("representative_title") or x.get("title") or "제목 없음"
+        url = x.get("url") or ""
+        source = x.get("source") or ""
+        try:
+            score_txt = f"{float(x.get('score') or 0.0):.2f}"
+        except Exception:
+            score_txt = "N/A"
+
+        if url:
+            lines.append(f"- {title} | {source} | score={score_txt} | {url}")
+        else:
+            lines.append(f"- {title} | {source} | score={score_txt}")
+
+    return "\n".join(lines)
 
 
 def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg: Dict[str, Any], log=None) -> str:
@@ -219,8 +389,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     temperature = float(llm_cfg.get("story_temperature", 0.1))
     max_tokens = int(llm_cfg.get("story_max_output_tokens", 2400))
 
-    # 기본값을 False로 둬서, 별도 설정하지 않으면 Sources 섹션이 나오지 않게 함
-    show_sources = bool(llm_cfg.get("show_sources_in_story", False))
+    # 이번 요구사항 기준으로 기본 True
+    show_reference_articles = bool(llm_cfg.get("show_reference_articles", True))
 
     asof = fact_pack.get("asof") or ""
     mode = fact_pack.get("run_mode") or ""
@@ -241,24 +411,24 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         sys_prompt = """
 너는 한국 sell-side 데일리 시황 작성자다.
 반드시 제공된 JSON 안의 정보만 사용한다.
-새 사실, 새 숫자, 새 해석 축을 임의로 추가하지 마라.
+새 사실, 새 숫자, 새 기사, 새 해석 축을 임의로 추가하지 마라.
 
 출력 규칙:
-- 처음부터 끝까지 자연스럽게 읽히는 서술형 한국어 본문으로 작성하라.
+- 처음부터 끝까지 자연스럽게 읽히는 서술형 한국어 본문만 작성하라.
 - 기사 제목을 나열하지 마라.
 - 이벤트 라벨이나 분류명(예: market_moving, sector_moving, secondary)을 본문에 쓰지 마라.
 - 괄호 속 메타정보를 쓰지 마라.
 - '관찰:', '추정:', '해석:' 같은 꼬리표를 붙이지 마라.
-- 문단은 4~6개 정도로 나누되, 각 문단은 자연스러운 줄글이어야 한다.
-- 첫 도입 문단에 핵심 지수·환율·금리 숫자가 이미 들어가 있으므로, 이후에는 같은 숫자를 기계적으로 반복하지 마라.
-- 다만 해석상 꼭 필요하면 같은 숫자를 1회 정도 다시 언급하는 것은 허용한다.
-- 본문은 숫자 문단을 따로 만들지 말고, 내용 속에 자연스럽게 녹여라.
-- 같은 표현과 같은 논지를 반복하지 마라.
-- events_top 상위 이벤트를 앞부분에서 우선 반영하되, 기사 제목을 그대로 옮기지 말고 자연스러운 시황 문장으로 재구성하라.
-- 인과가 약하면 단정하지 말고, '부담을 키웠다', '배경으로 작용했다', '영향을 준 것으로 보인다' 같은 완곡한 표현을 사용하라.
-- 업종/수급 데이터가 비어 있으면 억지로 채우지 말고 넘어가라.
+- 첫 문단의 지수/환율/금리 숫자는 이미 별도로 제공되므로, 본문 첫 두 문장에서는 같은 수익률과 지수 숫자를 반복하지 마라.
+- 특히 KOSPI, KOSDAQ, 원/달러, S&P500, NASDAQ의 등락률을 opening과 비슷한 형태로 다시 쓰지 마라.
+- 숫자를 다시 쓰더라도 해석상 꼭 필요한 경우로 제한하라.
+- 기사 제목을 거의 그대로 옮긴 문장을 만들지 마라.
+- 문단은 4~6개로 나누고, 각 문단은 보고서 본문처럼 자연스러운 줄글이어야 한다.
+- events_top 상위 이벤트를 앞부분에서 우선 반영하되, 기사 제목이 아니라 시황 해설 문장으로 재구성하라.
+- 인과가 약하면 단정하지 말고, '배경으로 작용했다', '부담 요인으로 남았다', '영향을 준 것으로 보인다' 같은 완곡한 표현을 사용하라.
+- 업종/수급 데이터가 비어 있으면 억지로 채우지 마라.
 - 마지막까지 보고서 본문처럼 매끄럽게 마무리하라.
-- '## Sources' 같은 출처 섹션은 작성하지 마라.
+- 출처 섹션, 참고 기사 섹션, 링크 목록은 절대 본문에 쓰지 마라.
 """
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
 
@@ -286,51 +456,9 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         chunks.append(body)
 
     text = "\n\n".join(chunks).strip()
+    result = header + text + "\n"
 
-    if show_sources:
-        # 필요할 때만 뒤에 붙이기
-        news_kr = fact_pack.get("news_kr", []) or []
-        news_gl = fact_pack.get("news_overnight", []) or fact_pack.get("news_global", []) or []
-        lines = ["## Sources"]
-        pool = []
-        seen = set()
+    if show_reference_articles:
+        result += "\n" + _render_reference_articles(fact_pack) + "\n"
 
-        for x in news_kr + news_gl:
-            key = (
-                str(x.get("event_id", "")).strip(),
-                str(x.get("title", "")).strip(),
-                str(x.get("url", "")).strip(),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            pool.append(x)
-
-        def _score(item):
-            try:
-                return float(item.get("score"))
-            except Exception:
-                return float("-inf")
-
-        pool = sorted(
-            pool,
-            key=lambda x: (_score(x), int(x.get("cluster_mentions") or 1)),
-            reverse=True
-        )[:5]
-
-        if not pool:
-            lines.append("- 없음")
-        else:
-            for x in pool:
-                score = x.get("score")
-                try:
-                    score_txt = f"{float(score):.2f}"
-                except Exception:
-                    score_txt = str(score) if score not in [None, ""] else "N/A"
-                lines.append(
-                    f"- ({x.get('event_id','')}/{x.get('id','')}) {x.get('representative_title') or x.get('title','')} | {x.get('source','')} | score={score_txt} | {x.get('url','')}"
-                )
-
-        return header + text + "\n\n" + "\n".join(lines) + "\n"
-
-    return header + text + "\n"
+    return result
