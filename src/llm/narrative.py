@@ -32,7 +32,7 @@ def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
     pool = []
     seen = set()
     for x in (news_kr or []) + (news_gl or []):
-        key = (str(x.get("title", "")).strip(), str(x.get("link", "") or x.get("url", "")).strip())
+        key = (str(x.get("event_id", "")).strip(), str(x.get("title", "")).strip(), str(x.get("url", "")).strip())
         if key in seen:
             continue
         seen.add(key)
@@ -44,7 +44,7 @@ def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
         except Exception:
             return float("-inf")
 
-    pool = sorted(pool, key=_score, reverse=True)[:top_k]
+    pool = sorted(pool, key=lambda x: (_score(x), int(x.get("cluster_mentions") or 1)), reverse=True)[:top_k]
     lines = ["## Sources"]
     if not pool:
         lines.append("- 없음")
@@ -57,8 +57,7 @@ def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
         except Exception:
             score_txt = str(score) if score not in [None, ""] else "N/A"
         lines.append(
-            f"- ({x.get('id','')}) {x.get('title','')} | {x.get('source','')} | "
-            f"score={score_txt} | {x.get('link','') or x.get('url','')}"
+            f"- ({x.get('event_id','')}/{x.get('id','')}) {x.get('representative_title') or x.get('title','')} | {x.get('source','')} | score={score_txt} | {x.get('url','')}"
         )
     return "\n".join(lines)
 
@@ -125,26 +124,42 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     p1 = ""
     if seg1:
         if len(seg1) == 2:
-            p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]} 반등하며 전일 급락분의 일부를 되돌리는 흐름을 보였다."
+            p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]}를 기록했다."
         else:
-            p1 = f"오늘 국내 증시는 {seg1[0]} 움직이며 전일 충격을 일부 되돌리는 흐름을 보였다."
+            p1 = f"오늘 국내 증시는 {seg1[0]}를 기록했다."
 
     seg2 = []
     if usdkrw and usdkrw.get("ret1d_pct") is not None:
-        seg2.append(f"원/달러가 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
+        seg2.append(f"원/달러는 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
     if ust10 and ust10.get("chg1d_bp") is not None:
-        seg2.append(f"미국 10년물이 {_fmt_bp(ust10.get('chg1d_bp'))}")
+        seg2.append(f"미국 10년물은 {_fmt_bp(ust10.get('chg1d_bp'))}")
     if spx and spx.get("ret1d_pct") is not None:
-        seg2.append(f"S&P500이 {_fmt_pct(spx.get('ret1d_pct'))}")
+        seg2.append(f"S&P500은 {_fmt_pct(spx.get('ret1d_pct'))}")
     if ndx and ndx.get("ret1d_pct") is not None:
-        seg2.append(f"NASDAQ이 {_fmt_pct(ndx.get('ret1d_pct'))}")
+        seg2.append(f"NASDAQ은 {_fmt_pct(ndx.get('ret1d_pct'))}")
 
     p2 = ""
     if seg2:
-        joined = ", ".join(seg2[:3])
-        p2 = f"개장 전에는 {joined} 수준을 나타내며 위험회피 완화 기대를 뒷받침했다."
+        joined = ", ".join(seg2[:4])
+        p2 = f"개장 전 여건으로는 {joined} 수준이 확인됐다."
 
     return " ".join([x for x in [p1, p2] if x]).strip()
+
+
+def _build_driver_anchor(fact_pack: Dict[str, Any]) -> str:
+    events = (fact_pack.get("events_top") or [])[:3]
+    if not events:
+        return ""
+    chunks = []
+    for ev in events:
+        theme = str(ev.get("theme") or ev.get("summary") or "").strip()
+        if not theme:
+            continue
+        impact = ev.get("impact_scope") or "secondary"
+        chunks.append(f"{theme}({impact})")
+    if not chunks:
+        return ""
+    return "오늘 핵심 이벤트는 " + ", ".join(chunks) + "였다."
 
 
 def _split_sentences(text: str) -> List[str]:
@@ -169,7 +184,7 @@ def _drop_duplicate_market_sentence(sentences: List[str], opening: str) -> List[
     filtered = []
     for i, s in enumerate(sentences):
         if i == 0:
-            has_market_key = sum(1 for k in opening_keys if k in s) >= 2
+            has_market_key = sum(1 for k in opening_keys if k in s) >= 3
             has_pct = "%" in s or "bp" in s
             if has_market_key and has_pct:
                 continue
@@ -183,12 +198,10 @@ def _ensure_complete_sentence(s: str) -> str:
         return s
     if s.endswith(("다.", "요.", ".", "!", "?")):
         return s
-    if s.endswith(("보다", "가운데", "수준", "흐름", "가능성", "우려", "부담", "변수", "영향", "국면")):
-        return s + "는 점을 확인할 필요가 있다."
     return s + "."
 
 
-def _chunk_paragraph(sentences: List[str], target_chars: int = 150, max_chars: int = 190) -> List[str]:
+def _chunk_paragraph(sentences: List[str], target_chars: int = 170, max_chars: int = 230) -> List[str]:
     paras = []
     cur = []
     cur_len = 0
@@ -233,7 +246,7 @@ def _clean_body(text: str, opening: str) -> str:
     if not sentences:
         return ""
 
-    paras = _chunk_paragraph(sentences, target_chars=150, max_chars=190)
+    paras = _chunk_paragraph(sentences, target_chars=170, max_chars=230)
     return "\n\n".join(paras[:6]).strip()
 
 
@@ -252,6 +265,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
 
     opening = _build_opening_paragraph(fact_pack)
+    driver_anchor = _build_driver_anchor(fact_pack)
     sources_md = _render_sources_md(
         fact_pack.get("news_kr", []) or [],
         fact_pack.get("news_overnight", []) or fact_pack.get("news_global", []) or [],
@@ -271,13 +285,14 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 첫 도입 문단에 핵심 지수·환율·금리 숫자가 이미 자연스럽게 들어가 있으므로, 이후에는 같은 숫자를 기계적으로 반복하지 마라.
 하지만 해석에 꼭 필요하면 숫자를 1회 정도 다시 언급하는 것은 허용한다.
 본문은 숫자 문단을 따로 만들지 말고, 내용 속에 자연스럽게 녹여라.
-문단은 너무 길게 이어가지 말고, 한 문단이 약 150자 안팎이 되도록 적절히 호흡을 나눠라.
-같은 논지가 이어지더라도 가독성을 위해 문단을 나눌 수 있다.
+문단은 너무 길게 이어가지 말고, 한 문단이 약 150~200자 안팎이 되도록 적절히 호흡을 나눠라.
 문단은 보통 4~6개가 되도록 하고, 문단별 분량은 대체로 비슷하게 맞춰라.
 문장이 잘린 채 끝나면 안 된다.
-문단 구성은 대체로 1) 오늘 반등의 성격 2) 업종/수급 또는 특징주 3) 정책/국내 변수 4) 해외 변수 5) 내일 이후 체크포인트 흐름을 따른다.
+문단 구성은 대체로 1) 오늘 장의 성격 2) 업종/수급 또는 특징주 3) 국내 변수 4) 해외 변수 5) 내일 이후 체크포인트 흐름을 따른다.
 같은 표현과 같은 논지를 반복하지 마라.
 '## Sources' 섹션은 작성하지 마라.
+반드시 events_top 상위 이벤트를 본문 앞단에서 우선 활용하라.
+관찰과 해석을 구분하고, 인과가 약하면 '추정:'으로 시작하라.
 """
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
 
@@ -301,6 +316,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     chunks = []
     if opening:
         chunks.append(opening)
+    if driver_anchor:
+        chunks.append(driver_anchor)
     if body:
         chunks.append(body)
 
