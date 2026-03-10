@@ -478,6 +478,7 @@ llm:
   story_max_output_tokens: 3200
   story_editor_max_output_tokens: 3200
   show_sources_in_story: false
+  show_reference_articles: true
 render:
   markdown: true
   excel: false
