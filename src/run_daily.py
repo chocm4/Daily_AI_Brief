@@ -11,7 +11,7 @@ from .ingest.rss import fetch_all_rss
 from .ingest.normalize import normalize_entries
 from .nlp.dedupe import dedupe_items
 from .nlp.semantic_cluster import semantic_cluster
-from .nlp.event_enricher import enrich_event_metadata
+from .nlp.event_enricher import pre_enrich_event_metadata, finalize_event_metadata
 from .nlp.tagger import tag_and_score
 from .nlp.filtering import filter_market_news, filter_brief_news
 from .nlp.ranker import select_top_news
@@ -153,11 +153,15 @@ def main():
     save_csv(out_root / "items_clustered.csv", items, log)
 
     # 2) dedupe
-    items = dedupe_items(items, similarity=cfg["rss"]["dedupe_similarity"], log=log)
+    items = dedupe_items(items, similarity=cfg["rss"]["dedupe_similarity"], cfg=cfg, log=log)
 
-    # 3) event enrich + tag + score
-    items = enrich_event_metadata(items, log=log)
+    # 3) event enrich + tag + score (2-pass)
+    items = pre_enrich_event_metadata(items, cfg=cfg, log=log)
     items = tag_and_score(items, cfg, log)
+    items = finalize_event_metadata(items, cfg=cfg, log=log)
+
+    if bool((cfg.get("app") or {}).get("save_debug_artifacts", False)):
+        save_json(out_root / "items_scored.json", items, log)
 
     # 3a) keep copy before market-only filter
     items_all = list(items)
@@ -168,9 +172,9 @@ def main():
     brief_quota = (cfg.get("rss", {}) or {}).get("brief_region_quota")
 
     try:
-        brief_news = select_top_news(brief_candidates, top_n=brief_top_n, quotas=brief_quota, log=log)
+        brief_news = select_top_news(brief_candidates, top_n=brief_top_n, quotas=brief_quota, max_items_per_event=int((cfg.get("rss", {}) or {}).get("max_items_per_event", 0)), log=log)
     except TypeError:
-        brief_news = select_top_news(brief_candidates, top_n=brief_top_n, region_quota=brief_quota, log=log)
+        brief_news = select_top_news(brief_candidates, top_n=brief_top_n, region_quota=brief_quota, max_items_per_event=int((cfg.get("rss", {}) or {}).get("max_items_per_event", 0)), log=log)
 
     save_csv(out_root / "brief.csv", brief_news, log)
 
@@ -184,9 +188,9 @@ def main():
     top_n = int(cfg["rss"]["top_n"])
 
     try:
-        top_news = select_top_news(items, top_n=top_n, quotas=region_quota, log=log)
+        top_news = select_top_news(items, top_n=top_n, quotas=region_quota, max_items_per_event=int((cfg.get("rss", {}) or {}).get("max_items_per_event", 0)), log=log)
     except TypeError:
-        top_news = select_top_news(items, top_n=top_n, region_quota=region_quota, log=log)
+        top_news = select_top_news(items, top_n=top_n, region_quota=region_quota, max_items_per_event=int((cfg.get("rss", {}) or {}).get("max_items_per_event", 0)), log=log)
 
     save_csv(out_root / "news.csv", top_news, log)
 

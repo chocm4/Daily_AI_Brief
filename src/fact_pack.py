@@ -53,18 +53,24 @@ def _slim_news(n: dict) -> dict:
     return {
         "id": n.get("id"),
         "event_id": n.get("event_id"),
+        "cluster_id": n.get("cluster_id"),
         "title": n.get("title", ""),
         "representative_title": n.get("representative_title", n.get("title", "")),
+        "representative_source": n.get("representative_source", n.get("source", "")),
         "source": n.get("source", ""),
         "published": n.get("published", ""),
         "url": n.get("link", ""),
         "tags": n.get("tags", []),
         "score": n.get("score", 0.0),
+        "score_breakdown": n.get("score_breakdown", {}),
         "region": n.get("region", ""),
         "event_type": n.get("event_type", "general_market"),
+        "secondary_event_types": n.get("secondary_event_types", []),
+        "event_labels": n.get("event_labels", []),
         "impact_scope": n.get("impact_scope", "secondary"),
         "korea_relevance": n.get("korea_relevance", "low"),
         "korea_relevance_score": n.get("korea_relevance_score", 0.0),
+        "korea_relevance_breakdown": n.get("korea_relevance_breakdown", {}),
         "cluster_mentions": n.get("cluster_mentions", n.get("mentions", 1)),
         "cluster_source_count": n.get("cluster_source_count", len(n.get("mention_sources") or [])),
         "entities": n.get("entities", []),
@@ -96,24 +102,33 @@ def _build_event_pack(items: list[dict]) -> list[dict]:
                 if s not in sources:
                     sources.append(s)
         news_ids = [x.get("id") for x in group if x.get("id")]
+        supporting_sources = [x.get("source") for x in group if x.get("source")]
         events.append(
             {
                 "event_id": event_id,
                 "theme": rep.get("representative_title") or rep.get("title"),
                 "event_type": rep.get("event_type", "general_market"),
+                "secondary_event_types": rep.get("secondary_event_types", []),
+                "event_labels": rep.get("event_labels", []),
                 "impact_scope": rep.get("impact_scope", "secondary"),
                 "region": rep.get("region", ""),
                 "summary": rep.get("title", ""),
                 "news_ids": news_ids,
+                "representative_news_id": rep.get("id"),
+                "supporting_news_ids": [x for x in news_ids if x != rep.get("id")],
                 "source_count": int(rep.get("cluster_source_count") or len(sources)),
                 "mention_count": int(rep.get("cluster_mentions") or len(group)),
                 "entities": rep.get("entities", []),
                 "market_links": rep.get("market_links", []),
                 "korea_relevance": rep.get("korea_relevance", "low"),
                 "korea_relevance_score": rep.get("korea_relevance_score", 0.0),
+                "korea_relevance_breakdown": rep.get("korea_relevance_breakdown", {}),
                 "sources": sources,
+                "representative_source": rep.get("source", ""),
+                "supporting_sources": supporting_sources,
                 "published": rep.get("published", ""),
                 "score": rep.get("score", 0.0),
+                "score_breakdown": rep.get("score_breakdown", {}),
             }
         )
 
@@ -127,6 +142,10 @@ def _build_event_pack(items: list[dict]) -> list[dict]:
         ),
         reverse=True,
     )
+
+    for idx, ev in enumerate(events, start=1):
+        ev["driver_rank"] = idx
+        ev["narrative_priority"] = "high" if idx <= 3 else ("medium" if idx <= 7 else "low")
     return events
 
 
