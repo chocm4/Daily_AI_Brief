@@ -88,62 +88,6 @@ def _benchmark(fact_pack: Dict[str, Any], name: str) -> Dict[str, Any] | None:
     return None
 
 
-def _market_snapshot_context(fact_pack: Dict[str, Any]) -> Dict[str, Any]:
-    mc = fact_pack.get("market_context") or {}
-    return {
-        "KOSPI": _benchmark(fact_pack, "KOSPI"),
-        "KOSDAQ": _benchmark(fact_pack, "KOSDAQ"),
-        "S&P500": _benchmark(fact_pack, "S&P500"),
-        "NASDAQ": _benchmark(fact_pack, "NASDAQ"),
-        "USDKRW": _benchmark(fact_pack, "USDKRW"),
-        "UST10Y": _benchmark(fact_pack, "UST 10Y"),
-        "WTI": _benchmark(fact_pack, "WTI"),
-        "VIX": _benchmark(fact_pack, "VIX"),
-        "sector_summary": mc.get("sector_summary") or {},
-        "flow_summary": mc.get("flow_summary") or {},
-        "feature_stocks": mc.get("feature_stocks") or [],
-        "style_flags": mc.get("style_flags") or [],
-    }
-
-
-def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
-    ctx = _market_snapshot_context(fact_pack)
-    kospi = ctx["KOSPI"]
-    kosdaq = ctx["KOSDAQ"]
-    usdkrw = ctx["USDKRW"]
-    ust10 = ctx["UST10Y"]
-    spx = ctx["S&P500"]
-    ndx = ctx["NASDAQ"]
-
-    parts = []
-    if kospi and kospi.get("ret1d_pct") is not None:
-        parts.append(f"KOSPI가 {_fmt_pct(kospi.get('ret1d_pct'))}")
-    if kosdaq and kosdaq.get("ret1d_pct") is not None:
-        parts.append(f"KOSDAQ이 {_fmt_pct(kosdaq.get('ret1d_pct'))}")
-    lead = ""
-    if parts:
-        if len(parts) == 2:
-            lead = f"오늘 국내 증시는 {parts[0]}, {parts[1]} 반등하며 출발했다."
-        else:
-            lead = f"오늘 국내 증시는 {parts[0]} 움직이며 출발했다."
-
-    follow = []
-    if usdkrw and usdkrw.get("ret1d_pct") is not None:
-        follow.append(f"원/달러는 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
-    if ust10 and ust10.get("chg1d_bp") is not None:
-        follow.append(f"미국 10년물은 {_fmt_bp(ust10.get('chg1d_bp'))}")
-    if spx and spx.get("ret1d_pct") is not None:
-        follow.append(f"S&P500은 {_fmt_pct(spx.get('ret1d_pct'))}")
-    if ndx and ndx.get("ret1d_pct") is not None:
-        follow.append(f"NASDAQ은 {_fmt_pct(ndx.get('ret1d_pct'))}")
-
-    second = ""
-    if follow:
-        second = ", ".join(follow[:3]) + " 수준이어서 개장 전 심리에는 우호적으로 작용했다."
-
-    return " ".join([x for x in [lead, second] if x]).strip()
-
-
 def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     mc = fact_pack.get("market_context") or {}
     return {
@@ -164,19 +108,96 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
     }
 
 
+def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
+    kospi = _benchmark(fact_pack, "KOSPI")
+    kosdaq = _benchmark(fact_pack, "KOSDAQ")
+    usdkrw = _benchmark(fact_pack, "USDKRW")
+    ust10 = _benchmark(fact_pack, "UST 10Y")
+    spx = _benchmark(fact_pack, "S&P500")
+    ndx = _benchmark(fact_pack, "NASDAQ")
+
+    seg1 = []
+    if kospi and kospi.get("ret1d_pct") is not None:
+        seg1.append(f"KOSPI가 {_fmt_pct(kospi.get('ret1d_pct'))}")
+    if kosdaq and kosdaq.get("ret1d_pct") is not None:
+        seg1.append(f"KOSDAQ이 {_fmt_pct(kosdaq.get('ret1d_pct'))}")
+
+    p1 = ""
+    if seg1:
+        if len(seg1) == 2:
+            p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]} 반등하며 전일 급락분의 일부를 되돌리는 흐름을 보였다."
+        else:
+            p1 = f"오늘 국내 증시는 {seg1[0]} 움직이며 전일 충격을 일부 되돌리는 흐름을 보였다."
+
+    seg2 = []
+    if usdkrw and usdkrw.get("ret1d_pct") is not None:
+        seg2.append(f"원/달러가 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
+    if ust10 and ust10.get("chg1d_bp") is not None:
+        seg2.append(f"미국 10년물이 {_fmt_bp(ust10.get('chg1d_bp'))}")
+    if spx and spx.get("ret1d_pct") is not None:
+        seg2.append(f"S&P500이 {_fmt_pct(spx.get('ret1d_pct'))}")
+    if ndx and ndx.get("ret1d_pct") is not None:
+        seg2.append(f"NASDAQ이 {_fmt_pct(ndx.get('ret1d_pct'))}")
+
+    p2 = ""
+    if seg2:
+        joined = ", ".join(seg2[:3])
+        p2 = f"개장 전에는 {joined} 수준을 나타내며 위험회피 완화 기대를 뒷받침했다."
+
+    return " ".join([x for x in [p1, p2] if x]).strip()
+
+
 def _split_sentences(text: str) -> List[str]:
-    raw = re.split(r'(?<=[.!?다])\s+', text or "")
-    return [x.strip() for x in raw if x and x.strip()]
+    text = (text or "").strip()
+    if not text:
+        return []
+    raw = re.split(r'(?<=[.!?])\s+|(?<=다\.)\s+|(?<=다)\s+', text)
+    out = []
+    for x in raw:
+        x = x.strip()
+        if x:
+            out.append(x)
+    return out
 
 
-def _chunk_paragraph(sentences: List[str], target_chars: int = 150, max_chars: int = 185) -> List[str]:
+def _drop_duplicate_market_sentence(sentences: List[str], opening: str) -> List[str]:
+    if not sentences:
+        return sentences
+
+    opening_keys = [k for k in ["KOSPI", "KOSDAQ", "원/달러", "USDKRW", "미국 10년물", "S&P500", "NASDAQ"] if k in opening]
+
+    filtered = []
+    for i, s in enumerate(sentences):
+        if i == 0:
+            has_market_key = sum(1 for k in opening_keys if k in s) >= 2
+            has_pct = "%" in s or "bp" in s
+            if has_market_key and has_pct:
+                continue
+        filtered.append(s)
+    return filtered
+
+
+def _ensure_complete_sentence(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        return s
+    if s.endswith(("다.", "요.", ".", "!", "?")):
+        return s
+    if s.endswith(("보다", "가운데", "수준", "흐름", "가능성", "우려", "부담", "변수", "영향", "국면")):
+        return s + "는 점을 확인할 필요가 있다."
+    return s + "."
+
+
+def _chunk_paragraph(sentences: List[str], target_chars: int = 150, max_chars: int = 190) -> List[str]:
     paras = []
     cur = []
     cur_len = 0
+
     for s in sentences:
-        s = s.strip()
+        s = _ensure_complete_sentence(s)
         if not s:
             continue
+
         add_len = len(s) + (1 if cur else 0)
         if cur and (cur_len + add_len > max_chars):
             paras.append(" ".join(cur).strip())
@@ -189,25 +210,30 @@ def _chunk_paragraph(sentences: List[str], target_chars: int = 150, max_chars: i
                 paras.append(" ".join(cur).strip())
                 cur = []
                 cur_len = 0
+
     if cur:
         paras.append(" ".join(cur).strip())
-    return paras
+
+    return [p for p in paras if p.strip()]
 
 
-def _clean_body(text: str) -> str:
+def _clean_body(text: str, opening: str) -> str:
     text = (text or "").strip()
     text = text.replace("## Sources", "").strip()
     text = re.sub(r'\n{3,}', '\n\n', text)
 
     raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    sentences = []
+    sentences: List[str] = []
     for p in raw_paras:
         sentences.extend(_split_sentences(p))
+
+    sentences = _drop_duplicate_market_sentence(sentences, opening)
+    sentences = [_ensure_complete_sentence(x) for x in sentences if x.strip()]
 
     if not sentences:
         return ""
 
-    paras = _chunk_paragraph(sentences, target_chars=150, max_chars=185)
+    paras = _chunk_paragraph(sentences, target_chars=150, max_chars=190)
     return "\n\n".join(paras[:6]).strip()
 
 
@@ -242,18 +268,17 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 너는 한국 sell-side 데일리 시황 작성자다.
 반드시 제공된 JSON 안의 정보만 사용한다.
 새 사실/새 숫자 추가 금지.
-본문 첫 문단에 숫자가 자연스럽게 포함된 도입 문장이 이미 들어가므로, 이후에는 같은 숫자를 기계적으로 반복하지 마라.
+첫 도입 문단에 핵심 지수·환율·금리 숫자가 이미 자연스럽게 들어가 있으므로, 이후에는 같은 숫자를 기계적으로 반복하지 마라.
 하지만 해석에 꼭 필요하면 숫자를 1회 정도 다시 언급하는 것은 허용한다.
-숫자 문단을 따로 만들지 말고, 내용 속에 자연스럽게 녹여라.
-문단은 너무 길게 이어가지 말고, 한 문단이 약 150자 안팎이 되도록 중간에 호흡을 나눠라.
+본문은 숫자 문단을 따로 만들지 말고, 내용 속에 자연스럽게 녹여라.
+문단은 너무 길게 이어가지 말고, 한 문단이 약 150자 안팎이 되도록 적절히 호흡을 나눠라.
 같은 논지가 이어지더라도 가독성을 위해 문단을 나눌 수 있다.
 문단은 보통 4~6개가 되도록 하고, 문단별 분량은 대체로 비슷하게 맞춰라.
-문장 수보다 문단의 호흡과 전개를 우선해라.
+문장이 잘린 채 끝나면 안 된다.
 문단 구성은 대체로 1) 오늘 반등의 성격 2) 업종/수급 또는 특징주 3) 정책/국내 변수 4) 해외 변수 5) 내일 이후 체크포인트 흐름을 따른다.
 같은 표현과 같은 논지를 반복하지 마라.
 '## Sources' 섹션은 작성하지 마라.
 """
-
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
 
         try:
@@ -271,7 +296,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
             if log:
                 log.warning(f"story generation failed: {e}")
 
-    body = _clean_body(body)
+    body = _clean_body(body, opening)
 
     chunks = []
     if opening:
