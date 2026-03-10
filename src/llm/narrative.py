@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List
 from openai import OpenAI
 
 
@@ -56,7 +56,10 @@ def _render_sources_md(news_kr: list, news_gl: list, top_k: int = 5) -> str:
             score_txt = f"{float(score):.2f}"
         except Exception:
             score_txt = str(score) if score not in [None, ""] else "N/A"
-        lines.append(f"- ({x.get('id','')}) {x.get('title','')} | {x.get('source','')} | score={score_txt} | {x.get('link','') or x.get('url','')}")
+        lines.append(
+            f"- ({x.get('id','')}) {x.get('title','')} | {x.get('source','')} | "
+            f"score={score_txt} | {x.get('link','') or x.get('url','')}"
+        )
     return "\n".join(lines)
 
 
@@ -65,50 +68,80 @@ def _benchmark(fact_pack: Dict[str, Any], name: str) -> Dict[str, Any] | None:
     bench = (mc.get("benchmark_summary") or {}).get(name)
     if bench:
         return bench
+
     for x in fact_pack.get("market", []) or []:
         if (x.get("name") or x.get("asset")) == name:
             kind = (x.get("kind") or "price").lower()
             if kind == "yield":
-                return {"name": name, "kind": kind, "chg1d_bp": x.get("chg1d_bp"), "level": x.get("level")}
-            return {"name": name, "kind": kind, "ret1d_pct": x.get("ret1d_pct"), "level": x.get("level")}
+                return {
+                    "name": name,
+                    "kind": kind,
+                    "chg1d_bp": x.get("chg1d_bp"),
+                    "level": x.get("level"),
+                }
+            return {
+                "name": name,
+                "kind": kind,
+                "ret1d_pct": x.get("ret1d_pct"),
+                "level": x.get("level"),
+            }
     return None
 
 
-def _market_lede(fact_pack: Dict[str, Any]) -> str:
-    kospi = _benchmark(fact_pack, "KOSPI")
-    kosdaq = _benchmark(fact_pack, "KOSDAQ")
-    spx = _benchmark(fact_pack, "S&P500")
-    ndx = _benchmark(fact_pack, "NASDAQ")
-    usdkrw = _benchmark(fact_pack, "USDKRW")
-    ust10 = _benchmark(fact_pack, "UST 10Y")
+def _market_snapshot_context(fact_pack: Dict[str, Any]) -> Dict[str, Any]:
+    mc = fact_pack.get("market_context") or {}
+    return {
+        "KOSPI": _benchmark(fact_pack, "KOSPI"),
+        "KOSDAQ": _benchmark(fact_pack, "KOSDAQ"),
+        "S&P500": _benchmark(fact_pack, "S&P500"),
+        "NASDAQ": _benchmark(fact_pack, "NASDAQ"),
+        "USDKRW": _benchmark(fact_pack, "USDKRW"),
+        "UST10Y": _benchmark(fact_pack, "UST 10Y"),
+        "WTI": _benchmark(fact_pack, "WTI"),
+        "VIX": _benchmark(fact_pack, "VIX"),
+        "sector_summary": mc.get("sector_summary") or {},
+        "flow_summary": mc.get("flow_summary") or {},
+        "feature_stocks": mc.get("feature_stocks") or [],
+        "style_flags": mc.get("style_flags") or [],
+    }
 
-    lines = []
 
-    bits1 = []
+def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
+    ctx = _market_snapshot_context(fact_pack)
+    kospi = ctx["KOSPI"]
+    kosdaq = ctx["KOSDAQ"]
+    usdkrw = ctx["USDKRW"]
+    ust10 = ctx["UST10Y"]
+    spx = ctx["S&P500"]
+    ndx = ctx["NASDAQ"]
+
+    parts = []
     if kospi and kospi.get("ret1d_pct") is not None:
-        bits1.append(f"KOSPI {_fmt_pct(kospi.get('ret1d_pct'))}")
+        parts.append(f"KOSPI가 {_fmt_pct(kospi.get('ret1d_pct'))}")
     if kosdaq and kosdaq.get("ret1d_pct") is not None:
-        bits1.append(f"KOSDAQ {_fmt_pct(kosdaq.get('ret1d_pct'))}")
-    if bits1:
-        if kospi and kosdaq and kospi.get("ret1d_pct") is not None and kosdaq.get("ret1d_pct") is not None and float(kospi.get("ret1d_pct")) > float(kosdaq.get("ret1d_pct")):
-            tail = "코스피 우위 반등이 1차 포인트였다."
+        parts.append(f"KOSDAQ이 {_fmt_pct(kosdaq.get('ret1d_pct'))}")
+    lead = ""
+    if parts:
+        if len(parts) == 2:
+            lead = f"오늘 국내 증시는 {parts[0]}, {parts[1]} 반등하며 출발했다."
         else:
-            tail = "지수 반등 강도 점검이 필요했다."
-        lines.append(", ".join(bits1) + f". {tail}")
+            lead = f"오늘 국내 증시는 {parts[0]} 움직이며 출발했다."
 
-    bits2 = []
-    if spx and spx.get("ret1d_pct") is not None:
-        bits2.append(f"S&P500 {_fmt_pct(spx.get('ret1d_pct'))}")
-    if ndx and ndx.get("ret1d_pct") is not None:
-        bits2.append(f"NASDAQ {_fmt_pct(ndx.get('ret1d_pct'))}")
+    follow = []
     if usdkrw and usdkrw.get("ret1d_pct") is not None:
-        bits2.append(f"원/달러 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
+        follow.append(f"원/달러는 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
     if ust10 and ust10.get("chg1d_bp") is not None:
-        bits2.append(f"미국 10년물 {_fmt_bp(ust10.get('chg1d_bp'))}")
-    if bits2:
-        lines.append(", ".join(bits2) + ". 해외 지수와 금리·환율 조합이 개장 전 심리를 뒷받침했다.")
+        follow.append(f"미국 10년물은 {_fmt_bp(ust10.get('chg1d_bp'))}")
+    if spx and spx.get("ret1d_pct") is not None:
+        follow.append(f"S&P500은 {_fmt_pct(spx.get('ret1d_pct'))}")
+    if ndx and ndx.get("ret1d_pct") is not None:
+        follow.append(f"NASDAQ은 {_fmt_pct(ndx.get('ret1d_pct'))}")
 
-    return "\n\n".join(lines).strip()
+    second = ""
+    if follow:
+        second = ", ".join(follow[:3]) + " 수준이어서 개장 전 심리에는 우호적으로 작용했다."
+
+    return " ".join([x for x in [lead, second] if x]).strip()
 
 
 def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
@@ -120,6 +153,8 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
         "overnight_bullets": report.get("overnight_bullets") or [],
         "top_drivers": report.get("top_drivers") or [],
         "market_context": {
+            "index_summary": mc.get("index_summary") or {},
+            "ficc_summary": mc.get("ficc_summary") or {},
             "sector_summary": mc.get("sector_summary") or {},
             "flow_summary": mc.get("flow_summary") or {},
             "feature_stocks": mc.get("feature_stocks") or [],
@@ -129,23 +164,58 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
     }
 
 
+def _split_sentences(text: str) -> List[str]:
+    raw = re.split(r'(?<=[.!?다])\s+', text or "")
+    return [x.strip() for x in raw if x and x.strip()]
+
+
+def _chunk_paragraph(sentences: List[str], target_chars: int = 150, max_chars: int = 185) -> List[str]:
+    paras = []
+    cur = []
+    cur_len = 0
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        add_len = len(s) + (1 if cur else 0)
+        if cur and (cur_len + add_len > max_chars):
+            paras.append(" ".join(cur).strip())
+            cur = [s]
+            cur_len = len(s)
+        else:
+            cur.append(s)
+            cur_len += add_len
+            if cur_len >= target_chars:
+                paras.append(" ".join(cur).strip())
+                cur = []
+                cur_len = 0
+    if cur:
+        paras.append(" ".join(cur).strip())
+    return paras
+
+
 def _clean_body(text: str) -> str:
     text = (text or "").strip()
     text = text.replace("## Sources", "").strip()
-    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    cleaned = []
-    for p in paras[:3]:
-        sents = re.split(r'(?<=[.!?다])\s+', p)
-        sents = [s.strip() for s in sents if s.strip()]
-        cleaned.append(" ".join(sents[:2]).strip())
-    return "\n\n".join(cleaned).strip()
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    sentences = []
+    for p in raw_paras:
+        sentences.extend(_split_sentences(p))
+
+    if not sentences:
+        return ""
+
+    paras = _chunk_paragraph(sentences, target_chars=150, max_chars=185)
+    return "\n\n".join(paras[:6]).strip()
 
 
 def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg: Dict[str, Any], log=None) -> str:
     llm_cfg = cfg.get("llm", {}) or {}
     model = llm_cfg.get("story_model", llm_cfg.get("model", "gpt-5.4"))
     temperature = float(llm_cfg.get("story_temperature", 0.1))
-    max_tokens = int(llm_cfg.get("story_max_output_tokens", 1600))
+    max_tokens = int(llm_cfg.get("story_max_output_tokens", 2400))
 
     asof = fact_pack.get("asof") or ""
     mode = fact_pack.get("run_mode") or ""
@@ -155,7 +225,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     if gen:
         header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
 
-    numeric_lede = _market_lede(fact_pack)
+    opening = _build_opening_paragraph(fact_pack)
     sources_md = _render_sources_md(
         fact_pack.get("news_kr", []) or [],
         fact_pack.get("news_overnight", []) or fact_pack.get("news_global", []) or [],
@@ -167,21 +237,32 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     if api_key:
         client = OpenAI(api_key=api_key)
         context = _build_llm_context(fact_pack, report)
+
         sys_prompt = """
 너는 한국 sell-side 데일리 시황 작성자다.
 반드시 제공된 JSON 안의 정보만 사용한다.
 새 사실/새 숫자 추가 금지.
-첫 2개 문단의 숫자 요약은 이미 위에 제시되어 있으니, 본문에서는 같은 숫자를 반복하지 마라.
-본문은 정확히 3개 문단으로 작성하고, 각 문단은 최대 2문장으로 제한한다.
-문단 구성은 1) 국내 반등의 성격 2) 정책/해외 변수의 의미 3) 내일 이후 체크포인트 순서로 한다.
+본문 첫 문단에 숫자가 자연스럽게 포함된 도입 문장이 이미 들어가므로, 이후에는 같은 숫자를 기계적으로 반복하지 마라.
+하지만 해석에 꼭 필요하면 숫자를 1회 정도 다시 언급하는 것은 허용한다.
+숫자 문단을 따로 만들지 말고, 내용 속에 자연스럽게 녹여라.
+문단은 너무 길게 이어가지 말고, 한 문단이 약 150자 안팎이 되도록 중간에 호흡을 나눠라.
+같은 논지가 이어지더라도 가독성을 위해 문단을 나눌 수 있다.
+문단은 보통 4~6개가 되도록 하고, 문단별 분량은 대체로 비슷하게 맞춰라.
+문장 수보다 문단의 호흡과 전개를 우선해라.
+문단 구성은 대체로 1) 오늘 반등의 성격 2) 업종/수급 또는 특징주 3) 정책/국내 변수 4) 해외 변수 5) 내일 이후 체크포인트 흐름을 따른다.
 같은 표현과 같은 논지를 반복하지 마라.
 '## Sources' 섹션은 작성하지 마라.
 """
+
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
+
         try:
             resp = client.responses.create(
                 model=model,
-                input=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_prompt}],
+                input=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 temperature=temperature,
                 max_output_tokens=max_tokens,
             )
@@ -191,11 +272,12 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
                 log.warning(f"story generation failed: {e}")
 
     body = _clean_body(body)
+
     chunks = []
-    if numeric_lede:
-        chunks.append(numeric_lede)
+    if opening:
+        chunks.append(opening)
     if body:
         chunks.append(body)
-    text = "\n\n".join(chunks).strip()
 
+    text = "\n\n".join(chunks).strip()
     return header + text + "\n\n" + sources_md + "\n"

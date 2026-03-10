@@ -18,7 +18,7 @@ Fact Pack에 없는 사실/숫자를 만들지 마라.
 - market_context.sector_summary.feature_sectors가 있으면 특징 업종 수익률을 반드시 숫자와 함께 반영한다.
 - market_context.feature_stocks가 있으면 특징주 수익률 또는 순매수 금액을 반드시 숫자와 함께 반영한다.
 - market_context.flow_summary가 있으면 외국인/기관/개인 수급 추이를 반드시 숫자와 함께 반영한다.
-- 같은 숫자와 같은 자산명을 같은 섹션 안에서 반복하지 마라.
+- 숫자는 단독 나열이 아니라 해석과 함께 붙여 써라.
 """
 
 USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아니라 '애널리스트형 Daily Market Note'를 작성해라.
@@ -38,8 +38,9 @@ USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아
 9) disclaimer: 'RSS 헤드라인 및 공개 데이터 기반의 자동 작성 초안' 포함.
 
 스타일 제약:
-- 같은 자산의 같은 숫자를 여러 섹션에서 반복하지 마라.
-- 이미 headline/today_5lines에서 쓴 숫자는 kr_bullets와 overnight_bullets에서 필요할 때만 재사용하라.
+- 숫자는 해석을 위해 필요한 경우 1회 정도 재언급할 수 있다.
+- 같은 숫자와 같은 자산명을 기계적으로 반복하지 마라.
+- 숫자를 따로 떼어 나열하지 말고, 문장 안에 자연스럽게 녹여라.
 - 해석은 숫자 바로 뒤에 붙여라. 숫자만 나열하지 마라.
 
 출력은 반드시 DailyBriefing 스키마에 맞는 JSON만 출력한다. 반드시 한국어로 작성한다.
