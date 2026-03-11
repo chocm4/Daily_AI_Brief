@@ -158,12 +158,113 @@ def _pick_lines(fact_pack: Dict[str, Any], names: List[str]) -> List[str]:
     return lines
 
 
+def _mode_focus(run_mode: str) -> Dict[str, Any]:
+    if run_mode == "KR_INTRADAY":
+        return {
+            "primary_market": "KR",
+            "primary_instruction": "국내 증시 장중 흐름을 중심에 두고, 전일 미국장과 현재 매크로 변수는 보조 근거로만 연결한다.",
+            "ordering": ["domestic", "flows", "sectors", "feature_stocks", "overnight_us", "macro"],
+            "tense": "국내는 현재형, 미국 전일장은 과거형",
+        }
+    if run_mode == "US_INTRADAY":
+        return {
+            "primary_market": "US",
+            "primary_instruction": "미국 증시 장중 흐름을 중심에 두고, 같은 날 한국 마감과 현재 매크로 변수는 연결 고리로만 활용한다.",
+            "ordering": ["us", "macro", "domestic_close", "sectors", "feature_stocks", "global_etf"],
+            "tense": "미국은 현재형, 한국은 과거형",
+        }
+    if run_mode == "KR_AFTERCLOSE_US_PREOPEN":
+        return {
+            "primary_market": "KR",
+            "primary_instruction": "막 끝난 한국장 해설이 중심이며, 전일 미국장과 현재 매크로는 오늘 한국장을 설명하는 배경으로 사용한다.",
+            "ordering": ["domestic_close", "flows", "sectors", "feature_stocks", "overnight_us", "macro"],
+            "tense": "한국은 과거형, 미국 개장 전은 현재형/예정 표현",
+        }
+    if run_mode == "US_AFTERCLOSE_KR_PREOPEN":
+        return {
+            "primary_market": "US",
+            "primary_instruction": "막 끝난 미국장 해설이 중심이며, 전일 한국장과 현재 매크로는 미국장을 해석하는 배경으로 사용한다.",
+            "ordering": ["us_close", "macro", "global_etf", "domestic_prev_close", "sectors", "feature_stocks"],
+            "tense": "미국은 과거형, 한국 개장 전은 현재형/예정 표현",
+        }
+    return {
+        "primary_market": "MIXED",
+        "primary_instruction": "가장 최근에 끝났거나 진행 중인 시장을 우선 설명하고, 다른 시장은 보조적으로만 연결한다.",
+        "ordering": ["domestic", "us", "macro"],
+        "tense": "세션 상태에 따라 시제를 맞춘다.",
+    }
+
+
+SALIENT_THRESHOLDS = {
+    "equity": 0.50,
+    "macro_pct": 0.30,
+    "yield_bp": 3.0,
+    "vol_pct": 4.0,
+    "oil_pct": 1.5,
+}
+
+
+def _salience_score(name: str, row: Optional[Dict[str, Any]]) -> float:
+    if not row:
+        return -1.0
+    kind = (row.get("kind") or "price").lower()
+    if kind == "yield":
+        return abs(_to_float(row.get("chg1d_bp")) or 0.0)
+    score = abs(_to_float(row.get("ret1d_pct")) or 0.0)
+    if name in {"VIX", "MOVE", "VKOSPI"}:
+        score += 2.0
+    if name in {"WTI", "USDKRW", "DXY", "EXY"}:
+        score += 0.5
+    return score
+
+
+def _is_salient(name: str, row: Optional[Dict[str, Any]]) -> bool:
+    if not row:
+        return False
+    kind = (row.get("kind") or "price").lower()
+    if kind == "yield":
+        return abs(_to_float(row.get("chg1d_bp")) or 0.0) >= SALIENT_THRESHOLDS["yield_bp"]
+
+    ret = abs(_to_float(row.get("ret1d_pct")) or 0.0)
+    level = _to_float(row.get("level"))
+    if name in {"VIX", "MOVE", "VKOSPI"}:
+        return ret >= SALIENT_THRESHOLDS["vol_pct"] or (level is not None and ((name == "VIX" and level >= 22) or (name == "MOVE" and level >= 95) or (name == "VKOSPI" and level >= 22)))
+    if name == "WTI":
+        return ret >= SALIENT_THRESHOLDS["oil_pct"]
+    if name in {"USDKRW", "DXY", "EXY", "Gold"}:
+        return ret >= SALIENT_THRESHOLDS["macro_pct"]
+    return ret >= SALIENT_THRESHOLDS["equity"]
+
+
+def _top_salient_assets(fact_pack: Dict[str, Any], names: List[str], max_n: int = 3, force_include: int = 0) -> List[str]:
+    picked = []
+    scored = []
+    for name in names:
+        row = _benchmark(fact_pack, name)
+        if not row:
+            continue
+        scored.append((name, row, _salience_score(name, row), _is_salient(name, row)))
+
+    scored.sort(key=lambda x: (x[3], x[2]), reverse=True)
+    for idx, (name, row, _score, salient) in enumerate(scored):
+        if salient or idx < force_include:
+            txt = _format_asset_line(str(fact_pack.get("run_mode") or ""), name, row)
+            if txt:
+                picked.append(txt)
+        if len(picked) >= max_n:
+            break
+    return picked
+
+
 def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     mc = fact_pack.get("market_context") or {}
+    run_mode = fact_pack.get("run_mode") or ""
+    mode_focus = _mode_focus(str(run_mode))
     return {
-        "run_mode": fact_pack.get("run_mode") or "",
+        "run_mode": run_mode,
         "generated_at_kst": fact_pack.get("generated_at_kst") or "",
         "session_clock": fact_pack.get("session_clock") or {},
+        "mode_focus": mode_focus,
         "headline": report.get("headline"),
         "today_5lines": report.get("today_5lines") or [],
         "kr_bullets": report.get("kr_bullets") or [],
@@ -186,9 +287,10 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
             "US_INTRADAY": "미국은 장중 데이터이며 국내는 전일 마감 기준일 가능성이 높다.",
         },
         "opening_reference": {
-            "domestic": _pick_lines(fact_pack, ["KOSPI", "KOSDAQ"]),
-            "global_equity": _pick_lines(fact_pack, ["S&P500", "NASDAQ", "MSCI ACWI", "MSCI DM", "MSCI EM"]),
-            "macro": _pick_lines(fact_pack, ["USDKRW", "DXY", "EXY", "UST 10Y", "VIX", "MOVE", "VKOSPI", "WTI"]),
+            "domestic": _top_salient_assets(fact_pack, ["KOSPI", "KOSDAQ"], max_n=2, force_include=2),
+            "us": _top_salient_assets(fact_pack, ["S&P500", "NASDAQ", "Dow Jones", "Russell 2000", "SOX"], max_n=3, force_include=2),
+            "global_etf": _top_salient_assets(fact_pack, ["MSCI ACWI", "MSCI DM", "MSCI EM"], max_n=2, force_include=0),
+            "macro": _top_salient_assets(fact_pack, ["USDKRW", "DXY", "EXY", "UST 10Y", "VIX", "MOVE", "VKOSPI", "WTI"], max_n=3, force_include=0),
         },
         "events_top": fact_pack.get("events_top") or [],
         "news_kr": fact_pack.get("news_kr") or [],
@@ -224,6 +326,7 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     kosdaq = _benchmark(fact_pack, "KOSDAQ")
     spx = _benchmark(fact_pack, "S&P500")
     ndx = _benchmark(fact_pack, "NASDAQ")
+    dow = _benchmark(fact_pack, "Dow Jones")
     sox = _benchmark(fact_pack, "SOX")
     usdkrw = _benchmark(fact_pack, "USDKRW")
     dxy = _benchmark(fact_pack, "DXY")
@@ -231,79 +334,106 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     vix = _benchmark(fact_pack, "VIX")
     move = _benchmark(fact_pack, "MOVE")
     wti = _benchmark(fact_pack, "WTI")
+    acwi = _benchmark(fact_pack, "MSCI ACWI")
+    em = _benchmark(fact_pack, "MSCI EM")
 
     lines: List[str] = []
 
-    k1 = _pct(kospi)
-    k2 = _pct(kosdaq)
-    if k1 is not None and k2 is not None:
-        if run_mode == "KR_INTRADAY":
-            lines.append(f"오늘 국내 증시는 KOSPI가 {_fmt_pct_only(k1)} 움직이는 반면 KOSDAQ은 {_fmt_pct_only(k2)}로 상대적으로 약한 흐름을 보이고 있다.")
-        else:
-            if k1 > 0 and k2 <= 0:
-                lines.append(f"오늘 국내 증시는 KOSPI가 {_fmt_pct_only(k1)} 오른 반면 KOSDAQ은 {_fmt_pct_only(k2)}로 약보합에 머물렀다.")
-            elif k1 < 0 and k2 >= 0:
-                lines.append(f"오늘 국내 증시는 KOSPI가 {_fmt_pct_only(k1)} 내린 반면 KOSDAQ은 {_fmt_pct_only(k2)}로 상대적으로 선방했다.")
-            elif abs(k1 - k2) >= 0.7:
-                winner = "KOSPI" if k1 > k2 else "KOSDAQ"
-                lines.append(f"오늘 국내 증시는 {winner} 우위가 뚜렷했다. KOSPI는 {_fmt_pct_only(k1)}, KOSDAQ은 {_fmt_pct_only(k2)}로 마감했다.")
-            else:
-                lines.append(f"오늘 국내 증시는 KOSPI {_fmt_pct_only(k1)}, KOSDAQ {_fmt_pct_only(k2)}로 마감했다.")
-    elif k1 is not None:
-        lines.append(f"오늘 국내 증시는 KOSPI가 {_fmt_pct_only(k1)} 움직였다.")
+    def eq_line(name: str, row: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not row:
+            return None
+        ret = _pct(row)
+        lvl = _lvl(row)
+        if ret is None:
+            return None
+        if lvl is not None:
+            return f"{name} {_fmt_level(name, lvl)}({_fmt_pct_only(ret)})"
+        return f"{name} {_fmt_pct_only(ret)}"
 
-    us_bits: List[str] = []
-    spx_ret = _pct(spx)
-    ndx_ret = _pct(ndx)
-    sox_ret = _pct(sox)
-    if spx_ret is not None:
-        us_bits.append(f"S&P500 {_fmt_pct_only(spx_ret)}")
-    if ndx_ret is not None:
-        us_bits.append(f"NASDAQ {_fmt_pct_only(ndx_ret)}")
-    if sox_ret is not None and abs(sox_ret) >= 0.5:
-        us_bits.append(f"SOX {_fmt_pct_only(sox_ret)}")
+    def yield_line(name: str, row: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not row:
+            return None
+        bp = _bp(row)
+        lvl = _lvl(row)
+        if bp is None or lvl is None:
+            return None
+        return f"{name} {_fmt_level(name, lvl, kind='yield')}({_fmt_bp_only(bp)})"
 
-    if us_bits and run_mode in {"KR_AFTERCLOSE_US_PREOPEN", "KR_INTRADAY"}:
-        lines.append("전일 미국 증시는 " + ", ".join(us_bits) + "로 혼조였다.")
-    elif us_bits and run_mode in {"US_AFTERCLOSE_KR_PREOPEN", "US_INTRADAY"}:
-        if run_mode == "US_INTRADAY":
-            lines.append("현재 미국 증시는 " + ", ".join(us_bits[:2]) + " 흐름을 보이고 있다.")
-        else:
-            lines.append("미국 증시는 " + ", ".join(us_bits) + "로 마감했다.")
+    def move_line(name: str, row: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not row:
+            return None
+        kind = (row.get("kind") or "price").lower()
+        lvl = _lvl(row)
+        if kind == "yield":
+            bp = _bp(row)
+            if bp is None or lvl is None:
+                return None
+            return f"{name} {_fmt_level(name, lvl, kind='yield')}({_fmt_bp_only(bp)})"
+        ret = _pct(row)
+        if ret is None:
+            return None
+        if lvl is not None:
+            return f"{name} {_fmt_level(name, lvl)}({_fmt_pct_only(ret)})"
+        return f"{name} {_fmt_pct_only(ret)}"
 
-    macro_bits: List[str] = []
-    fx_ret = _pct(usdkrw)
-    fx_lvl = _lvl(usdkrw)
-    if fx_ret is not None and fx_lvl is not None and abs(fx_ret) >= 0.2:
-        macro_bits.append(f"원/달러 환율은 {_fmt_level('USDKRW', fx_lvl)}로 {_fmt_pct_only(fx_ret)}")
+    domestic_pair = [x for x in [eq_line("KOSPI", kospi), eq_line("KOSDAQ", kosdaq)] if x]
+    us_pair = [x for x in [eq_line("S&P500", spx), eq_line("NASDAQ", ndx)] if x]
 
-    dxy_ret = _pct(dxy)
-    dxy_lvl = _lvl(dxy)
-    if dxy_ret is not None and dxy_lvl is not None and abs(dxy_ret) >= 0.15:
-        macro_bits.append(f"달러인덱스는 {_fmt_level('DXY', dxy_lvl)}로 {_fmt_pct_only(dxy_ret)}")
+    if run_mode in {"KR_INTRADAY", "KR_AFTERCLOSE_US_PREOPEN"}:
+        if domestic_pair:
+            verb = "보이고 있다" if run_mode == "KR_INTRADAY" else "마감했다"
+            lines.append("국내 증시는 " + ", ".join(domestic_pair) + f"를 중심으로 {verb}.")
 
-    ust10_bp = _bp(ust10)
-    ust10_lvl = _lvl(ust10)
-    if ust10_bp is not None and ust10_lvl is not None and abs(ust10_bp) >= 1.5:
-        macro_bits.append(f"미국 10년물은 {_fmt_level('UST 10Y', ust10_lvl, kind='yield')}로 {_fmt_bp_only(ust10_bp)}")
+        macro_candidates = []
+        for name, row in [("USDKRW", usdkrw), ("UST 10Y", ust10), ("WTI", wti), ("DXY", dxy), ("VIX", vix), ("MOVE", move)]:
+            if _is_salient(name, row):
+                txt = move_line(name, row)
+                if txt:
+                    macro_candidates.append(txt)
+        if macro_candidates:
+            lines.append("배경 변수로는 " + ", ".join(macro_candidates[:2]) + "가 눈에 띄었다.")
 
-    vix_ret = _pct(vix)
-    vix_lvl = _lvl(vix)
-    if vix_ret is not None and vix_lvl is not None and (abs(vix_ret) >= 3 or vix_lvl >= 25):
-        macro_bits.append(f"VIX는 {_fmt_level('VIX', vix_lvl)}로 {_fmt_pct_only(vix_ret)}")
+        us_candidates = []
+        for name, row in [("S&P500", spx), ("NASDAQ", ndx), ("SOX", sox), ("Dow Jones", dow), ("MSCI ACWI", acwi), ("MSCI EM", em)]:
+            if _is_salient(name, row) or name in {"S&P500", "NASDAQ"}:
+                txt = move_line(name, row)
+                if txt:
+                    us_candidates.append(txt)
+        if us_candidates:
+            prefix = "전일 미국장은 " if run_mode == "KR_INTRADAY" else "전일 미국장은 "
+            lines.append(prefix + ", ".join(us_candidates[:2]) + " 흐름이었다.")
 
-    move_ret = _pct(move)
-    move_lvl = _lvl(move)
-    if move_ret is not None and move_lvl is not None and abs(move_ret) >= 5:
-        macro_bits.append(f"MOVE는 {_fmt_level('MOVE', move_lvl)}로 {_fmt_pct_only(move_ret)}")
+    elif run_mode in {"US_INTRADAY", "US_AFTERCLOSE_KR_PREOPEN"}:
+        if us_pair:
+            verb = "보이고 있다" if run_mode == "US_INTRADAY" else "로 마감했다"
+            lines.append("미국 증시는 " + ", ".join(us_pair) + (f" 흐름을 {verb}." if run_mode == "US_INTRADAY" else f"."))
 
-    wti_ret = _pct(wti)
-    wti_lvl = _lvl(wti)
-    if wti_ret is not None and wti_lvl is not None and abs(wti_ret) >= 1.0:
-        macro_bits.append(f"WTI는 {_fmt_level('WTI', wti_lvl)}달러로 {_fmt_pct_only(wti_ret)}")
+        macro_candidates = []
+        for name, row in [("UST 10Y", ust10), ("VIX", vix), ("MOVE", move), ("WTI", wti), ("DXY", dxy), ("USDKRW", usdkrw)]:
+            if _is_salient(name, row):
+                txt = move_line(name, row)
+                if txt:
+                    macro_candidates.append(txt)
+        if macro_candidates:
+            lines.append("같이 봐야 할 변수로는 " + ", ".join(macro_candidates[:2]) + "가 부각됐다.")
 
-    if macro_bits:
-        lines.append("대외 변수로는 " + ", ".join(macro_bits[:3]) + "가 확인됐다.")
+        kr_candidates = []
+        for name, row in [("KOSPI", kospi), ("KOSDAQ", kosdaq), ("MSCI EM", em)]:
+            if _is_salient(name, row) or name in {"KOSPI", "KOSDAQ"}:
+                txt = move_line(name, row)
+                if txt:
+                    kr_candidates.append(txt)
+        if kr_candidates:
+            lines.append("같은 날 한국 마감은 " + ", ".join(kr_candidates[:2]) + " 수준이었다.")
+
+    else:
+        salient = []
+        for name, row in [("KOSPI", kospi), ("KOSDAQ", kosdaq), ("S&P500", spx), ("NASDAQ", ndx), ("USDKRW", usdkrw), ("UST 10Y", ust10), ("WTI", wti)]:
+            txt = move_line(name, row)
+            if txt:
+                salient.append(txt)
+        if salient:
+            lines.append("주요 시장은 " + ", ".join(salient[:3]) + "가 우선 확인됐다.")
 
     return " ".join(lines).strip()
 
@@ -564,6 +694,9 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - 괄호 속 메타정보를 쓰지 마라.
 - '관찰:', '추정:', '해석:' 같은 꼬리표를 붙이지 마라.
 - opening 문단은 이미 별도로 들어가므로, 본문 첫 문단에서 지수·환율·금리·ETF를 한꺼번에 다시 나열하지 마라.
+- 가장 최근에 끝났거나 현재 진행 중인 시장을 본문의 앞부분에 우선 배치하고, 다른 시장은 그 시장을 설명하는 배경으로 후순위 반영하라.
+- mode_focus.primary_instruction과 mode_focus.ordering을 우선 따르라.
+- opening_reference에 있는 숫자를 전부 다시 쓰지 말고, 논지상 꼭 필요한 것만 선별해서 다시 불러와라.
 - opening 문단에 나온 숫자를 그대로 반복해 첫 문단을 시작하지 마라. 본문에서는 필요한 숫자만 논리 전개에 맞게 다시 불러와라.
 - benchmark를 소개할 때는 모든 자산을 다 덤프하지 말고, 해당 문단의 논지에 필요한 것만 선택해서 써라.
 - run_mode가 KR_AFTERCLOSE_US_PREOPEN이면 국내 지수는 오늘 마감 기준, 미국 지수는 전일 종가 기준임을 전제로 서술하라.
