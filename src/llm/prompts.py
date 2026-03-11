@@ -18,14 +18,15 @@ Fact Pack에 없는 사실/숫자를 만들지 마라.
 
 핵심 규칙:
 - market_context.index_summary가 있으면 KOSPI/KOSDAQ/S&P500/NASDAQ 중 사용 가능한 지수를 반드시 수익률 숫자와 함께 반영한다.
-- market_context.global_summary.world_etf가 있으면 MSCI ACWI / MSCI DM / MSCI EM을 가능한 범위에서 숫자와 함께 반영한다.
-- market_context.ficc_summary가 있으면 USDKRW, UST 10Y, DXY, EXY, WTI, VIX, MOVE, VKOSPI 중 사용 가능한 항목을 반드시 숫자와 함께 반영한다.
+- market_context.global_summary.world_etf가 있으면 MSCI ACWI / MSCI DM / MSCI EM을 필요한 범위에서 반영하되, 기계적 나열은 금지한다.
+- market_context.ficc_summary가 있으면 USDKRW, UST 10Y, DXY, EXY, WTI, VIX, MOVE, VKOSPI 중 사용 가능한 항목을 필요한 범위에서 반영한다.
 - market_context.sector_summary.feature_sectors가 있으면 특징 업종 수익률을 반드시 숫자와 함께 반영한다.
 - market_context.feature_stocks가 있으면 특징주 수익률 또는 순매수 금액을 반드시 숫자와 함께 반영한다.
 - market_context.flow_summary가 있으면 외국인/기관/개인 수급 추이를 반드시 숫자와 함께 반영한다.
 - 숫자는 단독 나열이 아니라 해석과 함께 붙여 써라.
 - KR_AFTERCLOSE_US_PREOPEN에서는 국내 지수는 오늘 마감 기준, 미국 지수와 글로벌 ETF는 전일 종가 기준임을 구분하라.
 - KR_INTRADAY / US_INTRADAY에서는 진행 중인 시장이라는 점을 문장에 반영하라.
+- 모든 벤치마크를 한 문단에 몰아넣지 말고, 문단의 논지와 직접 관련된 숫자만 선별해서 사용하라.
 """
 
 USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아니라 '애널리스트형 Daily Market Note'를 작성해라.
@@ -51,6 +52,7 @@ USER_PROMPT_TEMPLATE = """다음 Fact Pack을 바탕으로, 뉴스 요약이 아
 - 해석은 숫자 바로 뒤에 붙여라. 숫자만 나열하지 마라.
 - top_drivers와 bullets에서 같은 event_id를 중복 과잉 반영하지 마라.
 - KR_AFTERCLOSE_US_PREOPEN이면 국내 지수는 오늘 마감 기준, 미국 지수 및 글로벌 ETF는 전일 종가 기준으로 시제를 구분하라.
+- 벤치마크를 한 줄에 몰아 덤프하지 말고, 유의미한 숫자만 골라 문장 속에 녹여라.
 
 출력은 반드시 DailyBriefing 스키마에 맞는 JSON만 출력한다. 반드시 한국어로 작성한다.
 """
