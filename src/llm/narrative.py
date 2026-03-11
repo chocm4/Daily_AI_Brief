@@ -64,6 +64,7 @@ def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]
 def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     mc = fact_pack.get("market_context") or {}
     return {
+        "run_mode": fact_pack.get("run_mode") or "",
         "headline": report.get("headline"),
         "today_5lines": report.get("today_5lines") or [],
         "kr_bullets": report.get("kr_bullets") or [],
@@ -92,6 +93,14 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     spx = _benchmark(fact_pack, "S&P500")
     ndx = _benchmark(fact_pack, "NASDAQ")
 
+    run_mode = str(fact_pack.get("run_mode") or "")
+    intraday_mode = run_mode in {
+        "KR_INTRADAY",
+        "US_INTRADAY",
+        "KR_AFTERCLOSE_US_PREOPEN",
+        "US_AFTERCLOSE_KR_PREOPEN",
+    }
+
     seg1 = []
     if kospi and kospi.get("ret1d_pct") is not None:
         seg1.append(f"KOSPI가 {_fmt_pct(kospi.get('ret1d_pct'))}")
@@ -101,9 +110,15 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     p1 = ""
     if seg1:
         if len(seg1) == 2:
-            p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]}를 기록했다."
+            if run_mode == "KR_INTRADAY":
+                p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]} 흐름을 보이고 있다."
+            else:
+                p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]}를 기록했다."
         else:
-            p1 = f"오늘 국내 증시는 {seg1[0]}를 기록했다."
+            if run_mode == "KR_INTRADAY":
+                p1 = f"오늘 국내 증시는 {seg1[0]} 흐름을 보이고 있다."
+            else:
+                p1 = f"오늘 국내 증시는 {seg1[0]}를 기록했다."
 
     seg2 = []
     if usdkrw and usdkrw.get("ret1d_pct") is not None:
@@ -118,7 +133,10 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     p2 = ""
     if seg2:
         joined = ", ".join(seg2[:4])
-        p2 = f"개장 전 여건으로는 {joined} 수준이 확인됐다."
+        if intraday_mode:
+            p2 = f"현재까지 확인되는 대외 여건은 {joined} 수준이다."
+        else:
+            p2 = f"개장 전 여건으로는 {joined} 수준이 확인됐다."
 
     return " ".join([x for x in [p1, p2] if x]).strip()
 
@@ -128,7 +146,6 @@ def _split_sentences(text: str) -> List[str]:
     if not text:
         return []
 
-    # '다'에서 무조건 자르지 말고, 종결형 '다.' 중심으로만 분리
     parts = re.split(r'(?<=[.!?])\s+|(?<=다\.)\s+|(?<=다!)\s+|(?<=다\?)\s+', text)
     out = []
     for x in parts:
@@ -179,17 +196,14 @@ def _is_opening_duplicate_sentence(s: str, opening: str) -> bool:
 
     nums = _extract_number_signals(s)
 
-    # 케이스 1: opening과 같은 시장 숫자 문장을 다시 쓰는 경우
     if len(common_keys) >= 2 and len(nums) >= 2:
         return True
 
-    # 케이스 2: opening과 매우 비슷한 자산군 조합 + 수익률 서술
     market_like = any(k in s for k in ["KOSPI", "KOSDAQ", "코스피", "코스닥", "원/달러", "환율", "S&P500", "NASDAQ"])
     perf_like = "%" in s or "bp" in s
     if market_like and perf_like and len(common_keys) >= 1 and len(nums) >= 3:
         return True
 
-    # 케이스 3: 문장 내용 자체가 opening을 거의 재진술
     ns = _normalize_for_overlap(s)
     no = _normalize_for_overlap(opening)
     if ns and no:
@@ -211,12 +225,10 @@ def _drop_duplicate_market_sentences(sentences: List[str], opening: str) -> List
     dropped_first_duplicate = False
 
     for i, s in enumerate(sentences):
-        # 본문 초반 2문장까지는 opening 중복을 강하게 제거
         if i <= 1 and _is_opening_duplicate_sentence(s, opening):
             dropped_first_duplicate = True
             continue
 
-        # 첫 중복이 제거된 뒤 바로 이어지는 추가 수익률 나열도 한 번 더 제거
         if dropped_first_duplicate and i <= 2:
             keys = _mentioned_market_keys(s)
             nums = _extract_number_signals(s)
@@ -251,7 +263,6 @@ def _remove_meta_labels(text: str) -> str:
 def _remove_explicit_sources_block(text: str) -> str:
     if not text:
         return ""
-    # LLM이 혹시 출처 섹션을 만들어도 잘라냄
     text = re.split(r'\n##\s*Sources\b|\n##\s*출처\b|\n###\s*Sources\b|\n###\s*출처\b', text)[0]
     return text.strip()
 
@@ -303,7 +314,6 @@ def _clean_body(text: str, opening: str) -> str:
         s = s.strip()
         if not s:
             continue
-        # 비정상 분절 최소 보정
         s = re.sub(r'([가-힣A-Za-z0-9])\.\s+([가-힣])', r'\1 \2', s)
         s = _ensure_complete_sentence(s)
         clean_sentences.append(s)
@@ -389,7 +399,6 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     temperature = float(llm_cfg.get("story_temperature", 0.1))
     max_tokens = int(llm_cfg.get("story_max_output_tokens", 2400))
 
-    # 이번 요구사항 기준으로 기본 True
     show_reference_articles = bool(llm_cfg.get("show_reference_articles", True))
 
     asof = fact_pack.get("asof") or ""
@@ -425,6 +434,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - 기사 제목을 거의 그대로 옮긴 문장을 만들지 마라.
 - 문단은 4~6개로 나누고, 각 문단은 보고서 본문처럼 자연스러운 줄글이어야 한다.
 - events_top 상위 이벤트를 앞부분에서 우선 반영하되, 기사 제목이 아니라 시황 해설 문장으로 재구성하라.
+- JSON의 run_mode가 KR_INTRADAY 또는 US_INTRADAY이면 장중 코멘트로 작성하라. 이 경우 '했다', '마감했다'보다 '보이고 있다', '진행 중이다', '이어지고 있다' 같은 현재 시제를 우선 사용하라.
+- JSON의 run_mode가 KR_AFTERCLOSE_US_PREOPEN 또는 US_AFTERCLOSE_KR_PREOPEN이면 이미 끝난 세션은 과거형, 아직 진행 전이거나 진행 중인 세션은 현재형/예정 표현으로 구분하라.
 - 인과가 약하면 단정하지 말고, '배경으로 작용했다', '부담 요인으로 남았다', '영향을 준 것으로 보인다' 같은 완곡한 표현을 사용하라.
 - 업종/수급 데이터가 비어 있으면 억지로 채우지 마라.
 - 마지막까지 보고서 본문처럼 매끄럽게 마무리하라.
