@@ -1,6 +1,50 @@
 from typing import Any, Dict, List, Optional
 
 
+INDEX_ALIASES = {
+    "iShares MSCI ACWI": "MSCI ACWI",
+    "iShares MSCI World": "MSCI DM",
+    "iShares MSCI EM": "MSCI EM",
+    "Euro Currency Index": "EXY",
+}
+
+
+GLOBAL_INDEX_ORDER = [
+    "KOSPI",
+    "KOSDAQ",
+    "Dow Jones",
+    "S&P500",
+    "NASDAQ",
+    "Russell 2000",
+    "SOX",
+    "Nikkei 225",
+    "Taiwan Weighted",
+    "Hang Seng",
+    "CSI300",
+    "Shanghai Composite",
+    "Euro Stoxx 50",
+    "STOXX Europe 600",
+    "MSCI ACWI",
+    "MSCI DM",
+    "MSCI EM",
+]
+
+FICC_ORDER = [
+    "USDKRW",
+    "DXY",
+    "EXY",
+    "WTI",
+    "Gold",
+    "VIX",
+    "MOVE",
+    "VKOSPI",
+    "UST 3M",
+    "UST 5Y",
+    "UST 10Y",
+    "UST 30Y",
+]
+
+
 def _to_float(x) -> Optional[float]:
     try:
         if x is None or x == "":
@@ -24,10 +68,22 @@ def _fmt_bp(v) -> str:
     return f"{v:+.1f}bp"
 
 
+def _canonical_name(name: Optional[str]) -> str:
+    name = (name or "").strip()
+    return INDEX_ALIASES.get(name, name)
+
+
 def _find_asset(market: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+    targets = {name}
+    for raw_name, alias in INDEX_ALIASES.items():
+        if name == alias:
+            targets.add(raw_name)
+        if name == raw_name:
+            targets.add(alias)
+
     for x in market or []:
-        nm = x.get("name") or x.get("asset")
-        if nm == name:
+        nm = _canonical_name(x.get("name") or x.get("asset"))
+        if nm in targets:
             return x
     return None
 
@@ -37,8 +93,9 @@ def _asset_brief(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
     kind = (row.get("kind") or "price").lower()
+    name = _canonical_name(row.get("name") or row.get("asset") or "")
     out = {
-        "name": row.get("name") or row.get("asset") or "",
+        "name": name,
         "kind": kind,
         "level": row.get("level"),
         "date": row.get("date") or row.get("daily_date") or row.get("asof_date"),
@@ -66,7 +123,7 @@ def _top_moves(market: List[Dict[str, Any]], top_k: int = 8) -> List[Dict[str, A
 
         rows.append(
             {
-                "name": x.get("name") or x.get("asset") or "",
+                "name": _canonical_name(x.get("name") or x.get("asset") or ""),
                 "kind": kind,
                 "level": x.get("level"),
                 "ret1d_pct": _to_float(x.get("ret1d_pct")),
@@ -81,19 +138,7 @@ def _top_moves(market: List[Dict[str, Any]], top_k: int = 8) -> List[Dict[str, A
 
 
 def _build_benchmark_summary(market: List[Dict[str, Any]]) -> Dict[str, Any]:
-    names = [
-        "KOSPI",
-        "KOSDAQ",
-        "S&P500",
-        "NASDAQ",
-        "USDKRW",
-        "DXY",
-        "WTI",
-        "VIX",
-        "UST 2Y",
-        "UST 10Y",
-        "UST 30Y",
-    ]
+    names = GLOBAL_INDEX_ORDER + FICC_ORDER
     out = {}
     for name in names:
         row = _find_asset(market, name)
@@ -102,14 +147,64 @@ def _build_benchmark_summary(market: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
-def _build_index_summary(benchmarks: Dict[str, Any]) -> Dict[str, Any]:
-    keep = ["KOSPI", "KOSDAQ", "S&P500", "NASDAQ"]
+def _pick_rows(benchmarks: Dict[str, Any], keep: List[str]) -> Dict[str, Any]:
     return {k: benchmarks[k] for k in keep if k in benchmarks}
+
+
+def _build_index_summary(benchmarks: Dict[str, Any]) -> Dict[str, Any]:
+    return _pick_rows(
+        benchmarks,
+        [
+            "KOSPI",
+            "KOSDAQ",
+            "Dow Jones",
+            "S&P500",
+            "NASDAQ",
+            "Russell 2000",
+            "SOX",
+            "Nikkei 225",
+            "Taiwan Weighted",
+            "Hang Seng",
+            "CSI300",
+            "Shanghai Composite",
+            "Euro Stoxx 50",
+            "STOXX Europe 600",
+            "MSCI ACWI",
+            "MSCI DM",
+            "MSCI EM",
+        ],
+    )
 
 
 def _build_ficc_summary(benchmarks: Dict[str, Any]) -> Dict[str, Any]:
-    keep = ["USDKRW", "DXY", "WTI", "VIX", "UST 2Y", "UST 10Y", "UST 30Y"]
-    return {k: benchmarks[k] for k in keep if k in benchmarks}
+    return _pick_rows(
+        benchmarks,
+        [
+            "USDKRW",
+            "DXY",
+            "EXY",
+            "WTI",
+            "Gold",
+            "VIX",
+            "MOVE",
+            "VKOSPI",
+            "UST 3M",
+            "UST 5Y",
+            "UST 10Y",
+            "UST 30Y",
+        ],
+    )
+
+
+def _build_global_summary(benchmarks: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "domestic": _pick_rows(benchmarks, ["KOSPI", "KOSDAQ"]),
+        "us": _pick_rows(benchmarks, ["Dow Jones", "S&P500", "NASDAQ", "Russell 2000", "SOX"]),
+        "asia": _pick_rows(benchmarks, ["Nikkei 225", "Taiwan Weighted", "Hang Seng", "CSI300", "Shanghai Composite"]),
+        "europe": _pick_rows(benchmarks, ["Euro Stoxx 50", "STOXX Europe 600"]),
+        "world_etf": _pick_rows(benchmarks, ["MSCI ACWI", "MSCI DM", "MSCI EM"]),
+        "macro": _pick_rows(benchmarks, ["USDKRW", "DXY", "EXY", "WTI", "Gold", "VIX", "MOVE", "VKOSPI", "UST 10Y"]),
+    }
 
 
 def _infer_market_flags(benchmarks: Dict[str, Any], sector_summary: Dict[str, Any]) -> List[str]:
@@ -121,6 +216,9 @@ def _infer_market_flags(benchmarks: Dict[str, Any], sector_summary: Dict[str, An
     ust10 = benchmarks.get("UST 10Y")
     nasdaq = benchmarks.get("NASDAQ")
     vix = benchmarks.get("VIX")
+    move = benchmarks.get("MOVE")
+    vkospi = benchmarks.get("VKOSPI")
+    dxy = benchmarks.get("DXY")
 
     if kospi and kosdaq:
         k1 = _to_float(kospi.get("ret1d_pct"))
@@ -138,6 +236,14 @@ def _infer_market_flags(benchmarks: Dict[str, Any], sector_summary: Dict[str, An
                 flags.append("원화 약세 부담")
             elif fx <= -0.5:
                 flags.append("원화 강세 환경")
+
+    if dxy:
+        dx = _to_float(dxy.get("ret1d_pct"))
+        if dx is not None:
+            if dx >= 0.4:
+                flags.append("달러 강세 압력")
+            elif dx <= -0.4:
+                flags.append("달러 약세 완화")
 
     if ust10:
         y = _to_float(ust10.get("chg1d_bp"))
@@ -159,7 +265,17 @@ def _infer_market_flags(benchmarks: Dict[str, Any], sector_summary: Dict[str, An
     if vix:
         vv = _to_float(vix.get("ret1d_pct"))
         if vv is not None and vv >= 8:
-            flags.append("변동성 확대")
+            flags.append("미국 변동성 확대")
+
+    if move:
+        mv = _to_float(move.get("ret1d_pct"))
+        if mv is not None and mv >= 8:
+            flags.append("채권 변동성 확대")
+
+    if vkospi:
+        kv = _to_float(vkospi.get("ret1d_pct"))
+        if kv is not None and kv >= 8:
+            flags.append("국내 변동성 확대")
 
     dispersion = _to_float(sector_summary.get("dispersion_pctp"))
     if dispersion is not None and dispersion >= 2.5:
@@ -327,7 +443,8 @@ def build_market_context(
         "benchmark_summary": benchmarks,
         "index_summary": _build_index_summary(benchmarks),
         "ficc_summary": _build_ficc_summary(benchmarks),
-        "market_top_moves": _top_moves(market, top_k=8),
+        "global_summary": _build_global_summary(benchmarks),
+        "market_top_moves": _top_moves(market, top_k=12),
         "sector_summary": sector_summary,
         "flow_summary": flow_summary,
         "feature_stocks": feature_stocks,
