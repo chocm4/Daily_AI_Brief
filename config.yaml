@@ -394,69 +394,71 @@ news_scoring:
     generic: 0.03
     kr_region_base: 0.25
 market:
-  sectors_krx:
-    enabled: true
-    market: KOSPI
-    lookback_days: 14
-    top_k: 4
-    bottom_k: 4
-  flows_krx:
-    enabled: true
-    window:
-      start_hhmm: '1830'
-      end_hhmm: 0900
-    tops:
-      top_k: 5
-      investors:
-      - 외국인
-      - 기관합계
-      - 개인
-      include_price: true
   enabled: true
   source: yfinance
   history_days: 90
-  intraday_interval: 5m
+  intraday_interval: "5m"
+
+  sectors_krx:
+    enabled: true
+    market: "KOSPI"
+    lookback_days: 14
+    top_k: 4
+    bottom_k: 4
+
+  flows_krx:
+    enabled: true
+    window:
+      start_hhmm: "1830"
+      end_hhmm: "0900"
+    tops:
+      top_k: 5
+      investors: ["외국인", "기관합계", "개인"]
+      include_price: true
+
   assets:
-  - name: KOSPI
-    ticker: ^KS11
-  - name: KOSDAQ
-    ticker: ^KQ11
-  - name: Dow Jones
-    ticker: ^DJI
-  - name: S&P500
-    ticker: ^GSPC
-  - name: NASDAQ
-    ticker: ^IXIC
-  - name: iShares MSCI ACWI
-    ticker: ACWI
-  - name: iShares MSCI World
-    ticker: URTH
-  - name: iShares MSCI EM
-    ticker: EEM
-  - name: USDKRW
-    ticker: KRW=X
-  - name: DXY
-    ticker: DX-Y.NYB
-  - name: WTI
-    ticker: CL=F
-  - name: Gold
-    ticker: GC=F
-  - name: VIX
-    ticker: ^VIX
-  - name: MOVE
-    ticker: ^MOVE
-  - name: UST 3M
-    ticker: ^IRX
-    kind: yield
-  - name: UST 5Y
-    ticker: ^FVX
-    kind: yield
-  - name: UST 10Y
-    ticker: ^TNX
-    kind: yield
-  - name: UST 30Y
-    ticker: ^TYX
-    kind: yield
+    - {name: "KOSPI", ticker: "^KS11"}
+    - {name: "KOSDAQ", ticker: "^KQ11"}
+
+    # US
+    - {name: "Dow Jones", ticker: "^DJI"}
+    - {name: "S&P500", ticker: "^GSPC"}
+    - {name: "NASDAQ", ticker: "^IXIC"}
+    - {name: "Russell 2000", ticker: "^RUT"}
+    - {name: "SOX", ticker: "^SOX"}
+
+    # Asia / Europe
+    - {name: "Nikkei 225", ticker: "^N225"}
+    - {name: "Taiwan Weighted", ticker: "^TWII"}
+    - {name: "Hang Seng", ticker: "^HSI"}
+    - {name: "CSI300", ticker: "000300.SS"}
+    - {name: "Shanghai Composite", ticker: "000001.SS"}
+    - {name: "Euro Stoxx 50", ticker: "^STOXX50E"}
+    - {name: "STOXX Europe 600", ticker: "^STOXX"}
+
+    # Global equity ETF proxy
+    - {name: "MSCI ACWI", ticker: "ACWI"}
+    - {name: "MSCI DM", ticker: "URTH"}
+    - {name: "MSCI EM", ticker: "EEM"}
+
+    # FX / commodity / vol
+    - {name: "USDKRW", ticker: "KRW=X"}
+    - {name: "DXY", ticker: "DX-Y.NYB"}
+    - {name: "Euro Currency Index", ticker: "^XDE"}   # narrative에서 EXY로 표시
+    - {name: "WTI", ticker: "CL=F"}
+    - {name: "Gold", ticker: "GC=F"}
+    - {name: "VIX", ticker: "^VIX"}
+    - {name: "MOVE", ticker: "^MOVE"}
+
+    # Rates
+    - {name: "UST 3M", ticker: "^IRX", kind: "yield"}
+    - {name: "UST 5Y", ticker: "^FVX", kind: "yield"}
+    - {name: "UST 10Y", ticker: "^TNX", kind: "yield"}
+    - {name: "UST 30Y", ticker: "^TYX", kind: "yield"}
+
+    # VKOSPI는 현재 yfinance에서 안정적으로 검증된 표준 티커를 확정하지 못해 기본 패치에서는 제외.
+    # 유효 티커를 확보하면 아래 1줄만 추가하면 narrative / market_context는 자동 반영됨.
+    # - {name: "VKOSPI", ticker: "<VALID_TICKER>"}
 llm:
   enabled: true
   model: gpt-5.4
