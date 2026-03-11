@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
@@ -9,7 +10,8 @@ MARKET_KEYS = [
     "KOSPI", "KOSDAQ", "코스피", "코스닥",
     "원/달러", "USDKRW", "환율",
     "미국 10년물", "UST 10Y",
-    "S&P500", "NASDAQ", "나스닥", "VIX", "WTI"
+    "S&P500", "NASDAQ", "나스닥", "VIX", "WTI",
+    "MSCI ACWI", "MSCI DM", "MSCI EM", "DXY", "MOVE", "VKOSPI",
 ]
 
 
@@ -36,6 +38,36 @@ def _fmt_bp(v) -> str:
     return f"{v:+.1f}bp"
 
 
+def _fmt_level(name: str, level: Any, kind: str = "price") -> str:
+    v = _to_float(level)
+    if v is None:
+        return "데이터 없음"
+
+    name = str(name or "")
+    kind = (kind or "price").lower()
+
+    if kind == "yield":
+        return f"{v:.2f}%"
+    if name in {"USDKRW"}:
+        return f"{v:,.1f}원"
+    if name in {"DXY", "EXY", "VIX", "MOVE", "VKOSPI", "MSCI ACWI", "MSCI DM", "MSCI EM"}:
+        return f"{v:.2f}"
+    if name in {"WTI", "Gold"}:
+        return f"{v:,.2f}"
+    if abs(v) >= 1000:
+        return f"{v:,.2f}"
+    return f"{v:.2f}"
+
+
+def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts))
+    except Exception:
+        return None
+
+
 def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
     mc = fact_pack.get("market_context") or {}
     bench = (mc.get("benchmark_summary") or {}).get(name)
@@ -51,32 +83,115 @@ def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]
                     "kind": kind,
                     "chg1d_bp": x.get("chg1d_bp"),
                     "level": x.get("level"),
+                    "date": x.get("date"),
+                    "ref_ts_kst": x.get("ref_ts_kst"),
                 }
             return {
                 "name": name,
                 "kind": kind,
                 "ret1d_pct": x.get("ret1d_pct"),
                 "level": x.get("level"),
+                "date": x.get("date"),
+                "ref_ts_kst": x.get("ref_ts_kst"),
             }
     return None
+
+
+def _asset_basis_label(run_mode: str, name: str, row: Optional[Dict[str, Any]]) -> str:
+    if not row:
+        return ""
+
+    kind = (row.get("kind") or "price").lower()
+    if kind == "yield":
+        if run_mode == "KR_AFTERCLOSE_US_PREOPEN":
+            return "미국 전일 기준"
+        if run_mode == "US_AFTERCLOSE_KR_PREOPEN":
+            return "미국 당일 마감 기준"
+        if run_mode == "US_INTRADAY":
+            return "미국 장중 기준"
+        return "현재 기준"
+
+    if name in {"KOSPI", "KOSDAQ", "VKOSPI"}:
+        if run_mode == "KR_INTRADAY":
+            return "국내 장중 기준"
+        return "국내 당일 기준"
+
+    if name in {"S&P500", "NASDAQ", "Dow Jones", "Russell 2000", "SOX", "MSCI ACWI", "MSCI DM", "MSCI EM", "VIX", "MOVE"}:
+        if run_mode == "KR_AFTERCLOSE_US_PREOPEN":
+            return "미국 전일 종가 기준"
+        if run_mode == "US_INTRADAY":
+            return "미국 장중 기준"
+        if run_mode == "US_AFTERCLOSE_KR_PREOPEN":
+            return "미국 당일 마감 기준"
+        return "글로벌 최근 기준"
+
+    if name in {"Nikkei 225", "Taiwan Weighted", "Hang Seng", "CSI300", "Shanghai Composite", "Euro Stoxx 50", "STOXX Europe 600"}:
+        return "해외 최근 종가 기준"
+
+    if name in {"USDKRW", "DXY", "EXY", "WTI", "Gold"}:
+        return "현재 확인 기준"
+
+    return "최근 기준"
+
+
+def _format_asset_line(run_mode: str, name: str, row: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not row:
+        return None
+
+    kind = (row.get("kind") or "price").lower()
+    level_txt = _fmt_level(name, row.get("level"), kind=kind)
+    basis = _asset_basis_label(run_mode, name, row)
+
+    if kind == "yield":
+        move = _fmt_bp(row.get("chg1d_bp"))
+    else:
+        move = _fmt_pct(row.get("ret1d_pct"))
+
+    if level_txt == "데이터 없음" and move == "데이터 없음":
+        return None
+
+    if level_txt != "데이터 없음" and move != "데이터 없음":
+        return f"{name} {level_txt}({move}, {basis})"
+    if move != "데이터 없음":
+        return f"{name} {move}({basis})"
+    return f"{name} {level_txt}({basis})"
+
+
+def _pick_lines(fact_pack: Dict[str, Any], names: List[str]) -> List[str]:
+    run_mode = str(fact_pack.get("run_mode") or "")
+    lines: List[str] = []
+    for name in names:
+        text = _format_asset_line(run_mode, name, _benchmark(fact_pack, name))
+        if text:
+            lines.append(text)
+    return lines
 
 
 def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dict[str, Any]:
     mc = fact_pack.get("market_context") or {}
     return {
         "run_mode": fact_pack.get("run_mode") or "",
+        "generated_at_kst": fact_pack.get("generated_at_kst") or "",
+        "session_clock": fact_pack.get("session_clock") or {},
         "headline": report.get("headline"),
         "today_5lines": report.get("today_5lines") or [],
         "kr_bullets": report.get("kr_bullets") or [],
         "overnight_bullets": report.get("overnight_bullets") or [],
         "top_drivers": report.get("top_drivers") or [],
         "market_context": {
+            "benchmark_summary": mc.get("benchmark_summary") or {},
             "index_summary": mc.get("index_summary") or {},
             "ficc_summary": mc.get("ficc_summary") or {},
+            "global_summary": mc.get("global_summary") or {},
             "sector_summary": mc.get("sector_summary") or {},
             "flow_summary": mc.get("flow_summary") or {},
             "feature_stocks": mc.get("feature_stocks") or [],
             "style_flags": mc.get("style_flags") or [],
+        },
+        "opening_reference": {
+            "domestic": _pick_lines(fact_pack, ["KOSPI", "KOSDAQ"]),
+            "global_equity": _pick_lines(fact_pack, ["S&P500", "NASDAQ", "MSCI ACWI", "MSCI DM", "MSCI EM"]),
+            "macro": _pick_lines(fact_pack, ["USDKRW", "DXY", "EXY", "UST 10Y", "VIX", "MOVE", "VKOSPI", "WTI"]),
         },
         "events_top": fact_pack.get("events_top") or [],
         "news_kr": fact_pack.get("news_kr") or [],
@@ -86,59 +201,33 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
 
 
 def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
-    kospi = _benchmark(fact_pack, "KOSPI")
-    kosdaq = _benchmark(fact_pack, "KOSDAQ")
-    usdkrw = _benchmark(fact_pack, "USDKRW")
-    ust10 = _benchmark(fact_pack, "UST 10Y")
-    spx = _benchmark(fact_pack, "S&P500")
-    ndx = _benchmark(fact_pack, "NASDAQ")
-
     run_mode = str(fact_pack.get("run_mode") or "")
-    intraday_mode = run_mode in {
-        "KR_INTRADAY",
-        "US_INTRADAY",
-        "KR_AFTERCLOSE_US_PREOPEN",
-        "US_AFTERCLOSE_KR_PREOPEN",
-    }
 
-    seg1 = []
-    if kospi and kospi.get("ret1d_pct") is not None:
-        seg1.append(f"KOSPI가 {_fmt_pct(kospi.get('ret1d_pct'))}")
-    if kosdaq and kosdaq.get("ret1d_pct") is not None:
-        seg1.append(f"KOSDAQ이 {_fmt_pct(kosdaq.get('ret1d_pct'))}")
+    domestic = _pick_lines(fact_pack, ["KOSPI", "KOSDAQ"])
+    us_equity = _pick_lines(fact_pack, ["S&P500", "NASDAQ"])
+    world_equity = _pick_lines(fact_pack, ["MSCI ACWI", "MSCI DM", "MSCI EM"])
+    macro = _pick_lines(fact_pack, ["USDKRW", "DXY", "EXY", "UST 10Y", "VIX", "MOVE", "VKOSPI", "WTI"])
 
-    p1 = ""
-    if seg1:
-        if len(seg1) == 2:
-            if run_mode == "KR_INTRADAY":
-                p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]} 흐름을 보이고 있다."
-            else:
-                p1 = f"오늘 국내 증시는 {seg1[0]}, {seg1[1]}를 기록했다."
+    lines: List[str] = []
+
+    if domestic:
+        if run_mode == "KR_INTRADAY":
+            lines.append("오늘 국내 증시는 " + ", ".join(domestic) + " 흐름을 보이고 있다.")
         else:
-            if run_mode == "KR_INTRADAY":
-                p1 = f"오늘 국내 증시는 {seg1[0]} 흐름을 보이고 있다."
-            else:
-                p1 = f"오늘 국내 증시는 {seg1[0]}를 기록했다."
+            lines.append("오늘 국내 증시는 " + ", ".join(domestic) + "로 확인됐다.")
 
-    seg2 = []
-    if usdkrw and usdkrw.get("ret1d_pct") is not None:
-        seg2.append(f"원/달러는 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
-    if ust10 and ust10.get("chg1d_bp") is not None:
-        seg2.append(f"미국 10년물은 {_fmt_bp(ust10.get('chg1d_bp'))}")
-    if spx and spx.get("ret1d_pct") is not None:
-        seg2.append(f"S&P500은 {_fmt_pct(spx.get('ret1d_pct'))}")
-    if ndx and ndx.get("ret1d_pct") is not None:
-        seg2.append(f"NASDAQ은 {_fmt_pct(ndx.get('ret1d_pct'))}")
+    ext_parts = []
+    if us_equity:
+        ext_parts.append("미국 주식은 " + ", ".join(us_equity))
+    if world_equity:
+        ext_parts.append("글로벌 ETF는 " + ", ".join(world_equity))
+    if macro:
+        ext_parts.append("매크로 변수는 " + ", ".join(macro))
 
-    p2 = ""
-    if seg2:
-        joined = ", ".join(seg2[:4])
-        if intraday_mode:
-            p2 = f"현재까지 확인되는 대외 여건은 {joined} 수준이다."
-        else:
-            p2 = f"개장 전 여건으로는 {joined} 수준이 확인됐다."
+    if ext_parts:
+        lines.append(". ".join(ext_parts) + ".")
 
-    return " ".join([x for x in [p1, p2] if x]).strip()
+    return " ".join(lines).strip()
 
 
 def _split_sentences(text: str) -> List[str]:
@@ -199,7 +288,7 @@ def _is_opening_duplicate_sentence(s: str, opening: str) -> bool:
     if len(common_keys) >= 2 and len(nums) >= 2:
         return True
 
-    market_like = any(k in s for k in ["KOSPI", "KOSDAQ", "코스피", "코스닥", "원/달러", "환율", "S&P500", "NASDAQ"])
+    market_like = any(k in s for k in ["KOSPI", "KOSDAQ", "코스피", "코스닥", "원/달러", "환율", "S&P500", "NASDAQ", "MSCI ACWI", "MSCI DM", "MSCI EM"])
     perf_like = "%" in s or "bp" in s
     if market_like and perf_like and len(common_keys) >= 1 and len(nums) >= 3:
         return True
@@ -208,7 +297,7 @@ def _is_opening_duplicate_sentence(s: str, opening: str) -> bool:
     no = _normalize_for_overlap(opening)
     if ns and no:
         overlap_hits = 0
-        for token in ["kospi", "kosdaq", "원/달러", "s&p500", "nasdaq", "%", "bp", "기록했다", "수준이 확인됐다"]:
+        for token in ["kospi", "kosdaq", "원/달러", "s&p500", "nasdaq", "msci acwi", "msci dm", "msci em", "%", "bp", "기준"]:
             if token in ns and token in no:
                 overlap_hits += 1
         if overlap_hits >= 3 and len(nums) >= 2:
@@ -428,9 +517,13 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - 이벤트 라벨이나 분류명(예: market_moving, sector_moving, secondary)을 본문에 쓰지 마라.
 - 괄호 속 메타정보를 쓰지 마라.
 - '관찰:', '추정:', '해석:' 같은 꼬리표를 붙이지 마라.
-- 첫 문단의 지수/환율/금리 숫자는 이미 별도로 제공되므로, 본문 첫 두 문장에서는 같은 수익률과 지수 숫자를 반복하지 마라.
-- 특히 KOSPI, KOSDAQ, 원/달러, S&P500, NASDAQ의 등락률을 opening과 비슷한 형태로 다시 쓰지 마라.
-- 숫자를 다시 쓰더라도 해석상 꼭 필요한 경우로 제한하라.
+- 첫 문단의 지수/환율/금리 숫자는 opening_reference와 opening 문단에서 이미 제공되므로, 본문 첫 두 문장에서는 같은 수익률과 지수 숫자를 반복하지 마라.
+- run_mode가 KR_AFTERCLOSE_US_PREOPEN이면 국내 지수는 '오늘 마감 기준', 미국 지수는 '전일 종가 기준'임을 전제로 서술하라.
+- run_mode가 US_AFTERCLOSE_KR_PREOPEN이면 미국 지수는 '당일 마감 기준', 국내 지수는 '전일 국내 마감 기준'으로 다뤄라.
+- run_mode가 KR_INTRADAY 또는 US_INTRADAY이면 아직 진행 중인 시장이라는 점을 분명히 반영하라.
+- KOSDAQ을 설명할 때는 반드시 'KOSDAQ'이라고 명시하라. '중소형 성장주가 많은 시장' 같은 우회 표현은 금지한다.
+- 시장 비교가 필요하면 KOSPI 대 KOSDAQ, 또는 미국 대 글로벌 ETF처럼 명시적으로 적어라.
+- 지수/금리/환율/변동성 수치가 있으면 해석상 필요한 범위에서 level과 등락률을 함께 활용하라.
 - 기사 제목을 거의 그대로 옮긴 문장을 만들지 마라.
 - 문단은 4~6개로 나누고, 각 문단은 보고서 본문처럼 자연스러운 줄글이어야 한다.
 - events_top 상위 이벤트를 앞부분에서 우선 반영하되, 기사 제목이 아니라 시황 해설 문장으로 재구성하라.
