@@ -574,6 +574,41 @@ def _chunk_paragraph(sentences: List[str], target_chars: int = 180, max_chars: i
     return [p for p in paras if p.strip()]
 
 
+def _is_omittable_sentence(s: str, opening: str) -> bool:
+    s = (s or "").strip()
+    if not s:
+        return True
+
+    omit_patterns = [
+        r"수급 데이터는 비어",
+        r"수급[^.]{0,30}비어",
+        r"현물 수급 데이터가 없",
+        r"데이터가 없는 만큼",
+        r"데이터가 비어 있",
+        r"직접 원인으로 연결하기보다는",
+        r"장 방향을 바꿀 재료로 보기는 어렵",
+        r"의미 있는 재료로 보기 어렵",
+        r"오늘 장 방향을 바꿀 재료",
+        r"정량화는 어렵지만",
+        r"정량화하기 어렵",
+        r"단정하기는 어렵",
+        r"완전히 꺾인 것은 아니었",
+    ]
+    for pat in omit_patterns:
+        if re.search(pat, s):
+            return True
+
+    repeated_opening_keys = {"KOSPI", "KOSDAQ", "S&P500", "NASDAQ", "SOX", "USDKRW", "UST 10Y", "WTI", "VIX", "MSCI ACWI", "MSCI EM"}
+    keys = set(_mentioned_market_keys(s))
+    nums = _extract_number_signals(s)
+    if len(keys.intersection(repeated_opening_keys)) >= 2 and len(nums) >= 2:
+        if any(token in s for token in ["전일 미국장", "미국장은", "국내 증시는", "같은 날 한국 마감은"]):
+            if _is_opening_duplicate_sentence(s, opening) or len(keys) >= 2:
+                return True
+
+    return False
+
+
 def _clean_body(text: str, opening: str) -> str:
     text = (text or "").strip()
     text = _remove_explicit_sources_block(text)
@@ -591,6 +626,8 @@ def _clean_body(text: str, opening: str) -> str:
     for s in sentences:
         s = s.strip()
         if not s:
+            continue
+        if _is_omittable_sentence(s, opening):
             continue
         s = re.sub(r'([가-힣A-Za-z0-9])\.\s+([가-힣])', r'\1 \2', s)
         clean_sentences.append(_ensure_complete_sentence(s))
@@ -711,7 +748,9 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - JSON의 run_mode가 KR_INTRADAY 또는 US_INTRADAY이면 장중 코멘트로 작성하라. 이 경우 '했다', '마감했다'보다 '보이고 있다', '진행 중이다', '이어지고 있다' 같은 현재 시제를 우선 사용하라.
 - JSON의 run_mode가 KR_AFTERCLOSE_US_PREOPEN 또는 US_AFTERCLOSE_KR_PREOPEN이면 이미 끝난 세션은 과거형, 아직 진행 전이거나 진행 중인 세션은 현재형/예정 표현으로 구분하라.
 - 인과가 약하면 단정하지 말고, '배경으로 작용했다', '부담 요인으로 남았다', '영향을 준 것으로 보인다' 같은 완곡한 표현을 사용하라.
-- 업종/수급 데이터가 비어 있으면 억지로 채우지 마라.
+- 업종/수급 데이터가 비어 있으면 그 공백 자체를 언급하지 말고 해당 소재를 그냥 생략하라.
+- 당일 시장 방향성과 연결이 약한 재료는 '의미가 제한적이다', '장 방향을 바꿀 재료는 아니다', '정량화는 어렵다'처럼 평가하지 말고 아예 제외하라.
+- opening 문단이나 앞선 문단에서 이미 소개한 대표 지수 수익률을 후반 문단에서 다시 요약하지 마라.
 - 마지막까지 보고서 본문처럼 매끄럽게 마무리하라.
 - 출처 섹션, 참고 기사 섹션, 링크 목록은 절대 본문에 쓰지 마라.
 """
