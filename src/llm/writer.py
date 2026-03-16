@@ -105,6 +105,13 @@ def _find_market_row(market: List[Dict[str, Any]], name: str) -> Optional[Dict[s
     return None
 
 
+def _metric_keys(fp: Dict[str, Any], kind: str) -> tuple[str, str]:
+    weekly = str((fp or {}).get("run_mode") or "") == "WEEKLY_RECAP"
+    if kind == "yield":
+        return ("chg1w_bp", "chg1d_bp") if weekly else ("chg1d_bp", "chg1d_bp")
+    return ("ret1w_pct", "ret1d_pct") if weekly else ("ret1d_pct", "ret1d_pct")
+
+
 def _get_summary_row(fp: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
     mc = fp.get("market_context") or {}
     idx = mc.get("index_summary") or {}
@@ -117,29 +124,31 @@ def _get_summary_row(fp: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
         return None
     kind = (raw.get("kind") or "price").lower()
     if kind == "yield":
-        return {"name": name, "kind": kind, "chg1d_bp": raw.get("chg1d_bp")}
-    return {"name": name, "kind": kind, "ret1d_pct": raw.get("ret1d_pct")}
+        return {"name": name, "kind": kind, "chg1d_bp": raw.get("chg1d_bp"), "chg1w_bp": raw.get("chg1w_bp")}
+    return {"name": name, "kind": kind, "ret1d_pct": raw.get("ret1d_pct"), "ret1w_pct": raw.get("ret1w_pct")}
 
 
 def _build_numeric_headline(fp: Dict[str, Any]) -> str:
+    weekly = str((fp or {}).get("run_mode") or "") == "WEEKLY_RECAP"
     kospi = _get_summary_row(fp, "KOSPI")
     kosdaq = _get_summary_row(fp, "KOSDAQ")
     ust10 = _get_summary_row(fp, "UST 10Y")
     usdkrw = _get_summary_row(fp, "USDKRW")
 
     bits = []
-    if kospi and kospi.get("ret1d_pct") is not None:
-        bits.append(f"KOSPI {_fmt_pct(kospi.get('ret1d_pct'))}")
-    if kosdaq and kosdaq.get("ret1d_pct") is not None:
-        bits.append(f"KOSDAQ {_fmt_pct(kosdaq.get('ret1d_pct'))}")
-    if ust10 and ust10.get("chg1d_bp") is not None:
-        bits.append(f"미 10년물 {_fmt_bp(ust10.get('chg1d_bp'))}")
-    if usdkrw and usdkrw.get("ret1d_pct") is not None:
-        bits.append(f"원/달러 {_fmt_pct(usdkrw.get('ret1d_pct'))}")
+    if kospi and kospi.get("ret1w_pct" if weekly else "ret1d_pct") is not None:
+        bits.append(f"KOSPI {_fmt_pct(kospi.get('ret1w_pct' if weekly else 'ret1d_pct'))}")
+    if kosdaq and kosdaq.get("ret1w_pct" if weekly else "ret1d_pct") is not None:
+        bits.append(f"KOSDAQ {_fmt_pct(kosdaq.get('ret1w_pct' if weekly else 'ret1d_pct'))}")
+    if ust10 and ust10.get("chg1w_bp" if weekly else "chg1d_bp") is not None:
+        bits.append(f"미 10년물 {_fmt_bp(ust10.get('chg1w_bp' if weekly else 'chg1d_bp'))}")
+    if usdkrw and usdkrw.get("ret1w_pct" if weekly else "ret1d_pct") is not None:
+        bits.append(f"원/달러 {_fmt_pct(usdkrw.get('ret1w_pct' if weekly else 'ret1d_pct'))}")
 
     if bits:
-        return " · ".join(bits[:3]) + " 기준 시황 점검"
-    return "오늘의 시황"
+        suffix = "지난주 시황 점검" if weekly else "기준 시황 점검"
+        return " · ".join(bits[:3]) + f" {suffix}"
+    return "지난주 시황" if weekly else "오늘의 시황"
 
 
 def _fallback_today_5lines(fp: Dict[str, Any]) -> List[str]:

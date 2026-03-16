@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -69,6 +69,54 @@ def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
         return None
 
 
+
+
+KOR_WEEKDAYS = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+
+
+def _parse_date_ymd(s: Optional[str]) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s)[:10]).date()
+    except Exception:
+        return None
+
+
+def _row_date(row: Optional[Dict[str, Any]]) -> Optional[date]:
+    if not row:
+        return None
+    return _parse_date_ymd(row.get("date"))
+
+
+def _relative_day_label(target_date: Optional[date], generated_at_kst: Optional[datetime]) -> str:
+    if not target_date or not generated_at_kst:
+        return "최근"
+
+    ref_date = generated_at_kst.date()
+    delta = (ref_date - target_date).days
+
+    if delta <= 0:
+        return "오늘"
+    if delta == 1:
+        return "전일"
+
+    weekday = KOR_WEEKDAYS[target_date.weekday()]
+    same_iso_week = (
+        ref_date.isocalendar().year == target_date.isocalendar().year
+        and ref_date.isocalendar().week == target_date.isocalendar().week
+    )
+    if same_iso_week:
+        return f"지난 {weekday}"
+    if delta <= 7:
+        return f"지난주 {weekday}"
+    return f"{target_date.month}월 {target_date.day}일 {weekday}"
+
+
+def _market_day_label(fact_pack: Dict[str, Any], row: Optional[Dict[str, Any]]) -> str:
+    gen_dt = _parse_ts(fact_pack.get("generated_at_kst"))
+    return _relative_day_label(_row_date(row), gen_dt)
+
 def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:
     mc = fact_pack.get("market_context") or {}
     bench = (mc.get("benchmark_summary") or {}).get(name)
@@ -87,8 +135,10 @@ def _benchmark(fact_pack: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]
             }
             if kind == "yield":
                 base["chg1d_bp"] = x.get("chg1d_bp")
+                base["chg1w_bp"] = x.get("chg1w_bp")
             else:
                 base["ret1d_pct"] = x.get("ret1d_pct")
+                base["ret1w_pct"] = x.get("ret1w_pct")
             return base
     return None
 
@@ -186,6 +236,13 @@ def _mode_focus(run_mode: str) -> Dict[str, Any]:
             "primary_instruction": "막 끝난 미국장 해설이 중심이며, 전일 한국장과 현재 매크로는 미국장을 해석하는 배경으로 사용한다.",
             "ordering": ["us_close", "macro", "global_etf", "domestic_prev_close", "sectors", "feature_stocks"],
             "tense": "미국은 과거형, 한국 개장 전은 현재형/예정 표현",
+        }
+    if run_mode == "WEEKLY_RECAP":
+        return {
+            "primary_market": "MIXED",
+            "primary_instruction": "전주 주간 브리프다. 최근 5거래일 가격 변화와 전주 핵심 이벤트를 묶어 설명하고, 이번 주 체크포인트로 연결하라.",
+            "ordering": ["domestic", "us", "global_etf", "macro", "sectors", "feature_stocks"],
+            "tense": "지난주 기준 과거형",
         }
     return {
         "primary_market": "MIXED",
@@ -285,6 +342,7 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
             "US_AFTERCLOSE_KR_PREOPEN": "미국은 당일 마감 데이터, 국내는 전일 마감 데이터, 환율·원자재는 현재 확인 시점 데이터다.",
             "KR_INTRADAY": "국내는 장중 데이터이며 미국 주식은 전일 종가 기준일 가능성이 높다.",
             "US_INTRADAY": "미국은 장중 데이터이며 국내는 전일 마감 기준일 가능성이 높다.",
+            "WEEKLY_RECAP": "전주 월~일 뉴스와 최근 5거래일 기준 시장 변화로 작성하는 주간 브리프다.",
         },
         "opening_reference": {
             "domestic": _top_salient_assets(fact_pack, ["KOSPI", "KOSDAQ"], max_n=2, force_include=2),
@@ -299,12 +357,14 @@ def _build_llm_context(fact_pack: Dict[str, Any], report: Dict[str, Any]) -> Dic
     }
 
 
-def _pct(row: Optional[Dict[str, Any]]) -> Optional[float]:
-    return _to_float((row or {}).get("ret1d_pct"))
+def _pct(row: Optional[Dict[str, Any]], weekly: bool = False) -> Optional[float]:
+    key = "ret1w_pct" if weekly else "ret1d_pct"
+    return _to_float((row or {}).get(key))
 
 
-def _bp(row: Optional[Dict[str, Any]]) -> Optional[float]:
-    return _to_float((row or {}).get("chg1d_bp"))
+def _bp(row: Optional[Dict[str, Any]], weekly: bool = False) -> Optional[float]:
+    key = "chg1w_bp" if weekly else "chg1d_bp"
+    return _to_float((row or {}).get(key))
 
 
 def _lvl(row: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -319,8 +379,59 @@ def _fmt_bp_only(v: Optional[float]) -> Optional[str]:
     return None if v is None else f"{v:+.1f}bp"
 
 
+
+
+def _build_weekly_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
+    kospi = _benchmark(fact_pack, "KOSPI")
+    kosdaq = _benchmark(fact_pack, "KOSDAQ")
+    spx = _benchmark(fact_pack, "S&P500")
+    ndx = _benchmark(fact_pack, "NASDAQ")
+    usdkrw = _benchmark(fact_pack, "USDKRW")
+    ust10 = _benchmark(fact_pack, "UST 10Y")
+    wti = _benchmark(fact_pack, "WTI")
+    acwi = _benchmark(fact_pack, "MSCI ACWI")
+    em = _benchmark(fact_pack, "MSCI EM")
+    session = fact_pack.get("session") or {}
+    weekly_label = session.get("weekly_label") or "전주"
+
+    def line(name: str, row: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not row:
+            return None
+        kind = (row.get("kind") or "price").lower()
+        lvl = _lvl(row)
+        if kind == "yield":
+            mv = _bp(row, weekly=True)
+            if mv is None:
+                return None
+            return f"{name} {_fmt_level(name, lvl, kind='yield')}({_fmt_bp_only(mv)})" if lvl is not None else f"{name} {_fmt_bp_only(mv)}"
+        mv = _pct(row, weekly=True)
+        if mv is None:
+            return None
+        return f"{name} {_fmt_level(name, lvl)}({_fmt_pct_only(mv)})" if lvl is not None else f"{name} {_fmt_pct_only(mv)}"
+
+    lines: List[str] = []
+    domestic = [x for x in [line("KOSPI", kospi), line("KOSDAQ", kosdaq)] if x]
+    us = [x for x in [line("S&P500", spx), line("NASDAQ", ndx)] if x]
+    macro = [x for x in [line("USDKRW", usdkrw), line("UST 10Y", ust10), line("WTI", wti)] if x]
+    global_bits = [x for x in [line("MSCI ACWI", acwi), line("MSCI EM", em)] if x]
+
+    if domestic:
+        lines.append(f"지난주 국내 증시는 {', '.join(domestic)}를 기록했다.")
+    if us:
+        lines.append(f"지난주 미국 증시는 {', '.join(us)} 흐름이었다.")
+    if macro:
+        lines.append(f"같이 봐야 할 전주 핵심 변수로는 {', '.join(macro[:2])}가 있었다.")
+    if global_bits:
+        lines.append(f"글로벌 비교 기준으로는 {', '.join(global_bits[:2])}가 확인됐다.")
+
+    if lines:
+        lines[0] = f"{weekly_label} 기준, " + lines[0]
+    return "\n\n".join(lines).strip()
+
 def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     run_mode = str(fact_pack.get("run_mode") or "")
+    if run_mode == "WEEKLY_RECAP":
+        return _build_weekly_opening_paragraph(fact_pack)
 
     kospi = _benchmark(fact_pack, "KOSPI")
     kosdaq = _benchmark(fact_pack, "KOSDAQ")
@@ -336,6 +447,9 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
     wti = _benchmark(fact_pack, "WTI")
     acwi = _benchmark(fact_pack, "MSCI ACWI")
     em = _benchmark(fact_pack, "MSCI EM")
+
+    domestic_label = _market_day_label(fact_pack, kospi or kosdaq)
+    us_label = _market_day_label(fact_pack, spx or ndx or dow or sox)
 
     lines: List[str] = []
 
@@ -381,8 +495,10 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
 
     if run_mode in {"KR_INTRADAY", "KR_AFTERCLOSE_US_PREOPEN"}:
         if domestic_pair:
-            verb = "보이고 있다" if run_mode == "KR_INTRADAY" else "마감했다"
-            lines.append("국내 증시는 " + ", ".join(domestic_pair) + f"를 중심으로 {verb}.")
+            if run_mode == "KR_INTRADAY" and domestic_label == "오늘":
+                lines.append("오늘 국내 증시는 " + ", ".join(domestic_pair) + "를 중심으로 보이고 있다.")
+            else:
+                lines.append(f"{domestic_label} 국내 증시는 " + ", ".join(domestic_pair) + "를 중심으로 마감했다.")
 
         macro_candidates = []
         for name, row in [("USDKRW", usdkrw), ("UST 10Y", ust10), ("WTI", wti), ("DXY", dxy), ("VIX", vix), ("MOVE", move)]:
@@ -400,13 +516,14 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
                 if txt:
                     us_candidates.append(txt)
         if us_candidates:
-            prefix = "전일 미국장은 " if run_mode == "KR_INTRADAY" else "전일 미국장은 "
-            lines.append(prefix + ", ".join(us_candidates[:2]) + " 흐름이었다.")
+            lines.append(f"{us_label} 미국장은 " + ", ".join(us_candidates[:2]) + " 흐름이었다.")
 
     elif run_mode in {"US_INTRADAY", "US_AFTERCLOSE_KR_PREOPEN"}:
         if us_pair:
-            verb = "보이고 있다" if run_mode == "US_INTRADAY" else "로 마감했다"
-            lines.append("미국 증시는 " + ", ".join(us_pair) + (f" 흐름을 {verb}." if run_mode == "US_INTRADAY" else f"."))
+            if run_mode == "US_INTRADAY" and us_label == "오늘":
+                lines.append("미국 증시는 " + ", ".join(us_pair) + " 흐름을 보이고 있다.")
+            else:
+                lines.append(f"{us_label} 미국 증시는 " + ", ".join(us_pair) + "로 마감했다.")
 
         macro_candidates = []
         for name, row in [("UST 10Y", ust10), ("VIX", vix), ("MOVE", move), ("WTI", wti), ("DXY", dxy), ("USDKRW", usdkrw)]:
@@ -424,7 +541,7 @@ def _build_opening_paragraph(fact_pack: Dict[str, Any]) -> str:
                 if txt:
                     kr_candidates.append(txt)
         if kr_candidates:
-            lines.append("같은 날 한국 마감은 " + ", ".join(kr_candidates[:2]) + " 수준이었다.")
+            lines.append(f"{domestic_label} 한국 마감은 " + ", ".join(kr_candidates[:2]) + " 수준이었다.")
 
     else:
         salient = []
@@ -707,7 +824,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     mode = fact_pack.get("run_mode") or ""
     gen = fact_pack.get("generated_at_kst") or ""
 
-    header = f"# Daily Market Review (as of {asof})\n\n"
+    title = "Weekly Market Review" if mode == "WEEKLY_RECAP" else "Daily Market Review"
+    header = f"# {title} (as of {asof})\n\n"
     if gen:
         header += f"> generated_at_kst: {gen} | mode: {mode}\n\n"
 
@@ -739,6 +857,9 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - run_mode가 KR_AFTERCLOSE_US_PREOPEN이면 국내 지수는 오늘 마감 기준, 미국 지수는 전일 종가 기준임을 전제로 서술하라.
 - run_mode가 US_AFTERCLOSE_KR_PREOPEN이면 미국 지수는 당일 마감 기준, 국내 지수는 전일 국내 마감 기준으로 다뤄라.
 - run_mode가 KR_INTRADAY 또는 US_INTRADAY이면 아직 진행 중인 시장이라는 점을 분명히 반영하라.
+- run_mode가 WEEKLY_RECAP이면 전주 브리프로 작성하라. ret1w_pct / chg1w_bp가 있으면 이를 우선 사용하고, 지난주 월~일 뉴스 윈도를 중심에 둬라.
+- benchmark_summary 안 각 자산의 date가 generated_at_kst의 날짜와 다르면, '전일', '지난 화요일', '지난주 금요일'처럼 시점 표지를 명시하라.
+- 특히 월요일 아침처럼 주말을 건너뛴 경우에는 금요일 데이터를 '같은 날'이나 '전일'로 뭉뚱그리지 말고 가능하면 '지난주 금요일'이라고 명시하라.
 - KOSDAQ을 설명할 때는 반드시 'KOSDAQ'이라고 명시하라. '중소형 성장주가 많은 시장' 같은 우회 표현은 금지한다.
 - 시장 비교가 필요하면 KOSPI 대 KOSDAQ, 또는 미국 대 글로벌 ETF처럼 명시적으로 적어라.
 - 지수/금리/환율/변동성 수치가 있으면 해석상 필요한 범위에서 level과 등락률을 함께 활용하라.
@@ -747,6 +868,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 - events_top 상위 이벤트를 앞부분에서 우선 반영하되, 기사 제목이 아니라 시황 해설 문장으로 재구성하라.
 - JSON의 run_mode가 KR_INTRADAY 또는 US_INTRADAY이면 장중 코멘트로 작성하라. 이 경우 '했다', '마감했다'보다 '보이고 있다', '진행 중이다', '이어지고 있다' 같은 현재 시제를 우선 사용하라.
 - JSON의 run_mode가 KR_AFTERCLOSE_US_PREOPEN 또는 US_AFTERCLOSE_KR_PREOPEN이면 이미 끝난 세션은 과거형, 아직 진행 전이거나 진행 중인 세션은 현재형/예정 표현으로 구분하라.
+- JSON의 run_mode가 WEEKLY_RECAP이면 문단 전체를 지난주 회고형으로 쓰고, 마지막 문단은 이번 주 체크포인트로 마무리하라.
 - 인과가 약하면 단정하지 말고, '배경으로 작용했다', '부담 요인으로 남았다', '영향을 준 것으로 보인다' 같은 완곡한 표현을 사용하라.
 - 업종/수급 데이터가 비어 있으면 그 공백 자체를 언급하지 말고 해당 소재를 그냥 생략하라.
 - 당일 시장 방향성과 연결이 약한 재료는 '의미가 제한적이다', '장 방향을 바꿀 재료는 아니다', '정량화는 어렵다'처럼 평가하지 말고 아예 제외하라.
