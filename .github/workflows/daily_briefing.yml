@@ -2,8 +2,8 @@ name: AI Daily Briefing
 
 on:
   schedule:
-    # KST 07:00 = UTC 전날 22:00 (일~목 UTC = 월~금 KST 아침)
-    - cron: "0 22 * * 0-4"
+    # KST 07:00 = UTC 전날 22:00 (일~금 UTC = 월~토 KST 아침)
+    - cron: "0 22 * * 0-5"
     # KST 11:00 = UTC 02:00
     - cron: "0 2 * * 1-5"
     # KST 15:00 = UTC 06:00
