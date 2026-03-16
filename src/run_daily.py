@@ -83,6 +83,10 @@ def _build_rally_decomp(krx_flows: dict) -> dict:
     return out
 
 
+def _is_weekly_recap_slot(now_kst: dt.datetime) -> bool:
+    return now_kst.weekday() == 0 and _in_window(now_kst, "0630", "0830")
+
+
 def _detect_run_mode(now_kst: dt.datetime, cfg: dict) -> tuple[str, dict]:
     story_cfg = cfg.get("story", {}) or {}
 
@@ -116,6 +120,9 @@ def _detect_run_mode(now_kst: dt.datetime, cfg: dict) -> tuple[str, dict]:
         "us_open_kst": us_open_kst.isoformat(timespec="minutes"),
         "us_close_kst": us_close_kst.isoformat(timespec="minutes"),
     }
+
+    if _is_weekly_recap_slot(now_kst):
+        return "WEEKLY_RECAP", session_clock
 
     wd = now_kst.weekday()
     if wd >= 5:
@@ -215,11 +222,11 @@ def main():
             save_csv(out_root / "sectors_kr.csv", sectors_kr, log)
 
     # 7) fact pack
-    fact_pack = build_fact_pack(asof, top_news, market, cfg)
     now_kst = dt.datetime.now(tz=KST)
+    run_mode, session_clock = _detect_run_mode(now_kst, cfg)
+    fact_pack = build_fact_pack(asof, top_news, market, cfg, run_mode=run_mode, now_kst=now_kst)
     fact_pack["generated_at_kst"] = now_kst.isoformat(timespec="minutes")
 
-    run_mode, session_clock = _detect_run_mode(now_kst, cfg)
     fact_pack["run_mode"] = run_mode
     fact_pack["session_clock"] = session_clock
 
