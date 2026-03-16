@@ -104,10 +104,14 @@ def _asset_brief(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
     if kind == "yield":
         out["chg1d_bp"] = _to_float(row.get("chg1d_bp"))
+        out["chg1w_bp"] = _to_float(row.get("chg1w_bp"))
         out["move_text"] = _fmt_bp(row.get("chg1d_bp"))
+        out["move_text_1w"] = _fmt_bp(row.get("chg1w_bp")) if row.get("chg1w_bp") is not None else "데이터 없음"
     else:
         out["ret1d_pct"] = _to_float(row.get("ret1d_pct"))
+        out["ret1w_pct"] = _to_float(row.get("ret1w_pct"))
         out["move_text"] = _fmt_pct(row.get("ret1d_pct"))
+        out["move_text_1w"] = _fmt_pct(row.get("ret1w_pct")) if row.get("ret1w_pct") is not None else "데이터 없음"
 
     return out
 
@@ -127,7 +131,9 @@ def _top_moves(market: List[Dict[str, Any]], top_k: int = 8) -> List[Dict[str, A
                 "kind": kind,
                 "level": x.get("level"),
                 "ret1d_pct": _to_float(x.get("ret1d_pct")),
+                "ret1w_pct": _to_float(x.get("ret1w_pct")),
                 "chg1d_bp": _to_float(x.get("chg1d_bp")),
+                "chg1w_bp": _to_float(x.get("chg1w_bp")),
                 "abs_move": mag,
             }
         )

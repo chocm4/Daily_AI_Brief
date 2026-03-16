@@ -8,11 +8,11 @@ def compute_snapshot(
     z_window: int = 20,
     kind: str = "price",
 ) -> dict:
-    """Compute a 1D move snapshot.
+    """Compute a 1D/1W move snapshot.
 
     kind:
-      - "price" (default): treat close as a price/index level and compute 1D % return.
-      - "yield": treat close as a yield level and compute 1D change in bp.
+      - "price" (default): treat close as a price/index level and compute 1D/1W % return.
+      - "yield": treat close as a yield level and compute 1D/1W change in bp.
     """
     if hist is None or getattr(hist, "empty", True):
         raise ValueError("empty history")
@@ -42,6 +42,8 @@ def compute_snapshot(
         dclose = close.diff()
         chg1d = float(dclose.iloc[-1]) if pd.notna(dclose.iloc[-1]) else 0.0
         chg1d_bp = chg1d * 100.0
+        chg1w = float(close.iloc[-1] - close.iloc[-6]) if len(close) >= 6 and pd.notna(close.iloc[-6]) else None
+        chg1w_bp = (chg1w * 100.0) if chg1w is not None else None
 
         d = dclose.dropna()
         z = 0.0
@@ -53,6 +55,7 @@ def compute_snapshot(
     else:
         ret = close.pct_change()
         ret1d = float(ret.iloc[-1]) if pd.notna(ret.iloc[-1]) else 0.0
+        ret1w = float(close.iloc[-1] / close.iloc[-6] - 1.0) if len(close) >= 6 and pd.notna(close.iloc[-6]) and close.iloc[-6] != 0 else None
 
         r = ret.dropna()
         z = 0.0
@@ -76,6 +79,8 @@ def compute_snapshot(
             {
                 "chg1d": round(chg1d, 4),
                 "chg1d_bp": round(chg1d_bp, 1),
+                "chg1w": round(chg1w, 4) if chg1w is not None else None,
+                "chg1w_bp": round(chg1w_bp, 1) if chg1w_bp is not None else None,
                 "z20_chg": round(z, 3),
             }
         )
@@ -83,6 +88,7 @@ def compute_snapshot(
         base.update(
             {
                 "ret1d_pct": round(ret1d * 100, 3),
+                "ret1w_pct": round(ret1w * 100, 3) if ret1w is not None else None,
                 "z20_ret": round(z, 3),
             }
         )
