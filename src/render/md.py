@@ -1,8 +1,6 @@
-
 def _fmt_kst(ts_iso: str) -> str:
     try:
         s = ts_iso.replace("T", " ")
-        # "YYYY-mm-dd HH:MM"
         return s[:16] + " KST"
     except Exception:
         return ts_iso
@@ -10,20 +8,25 @@ def _fmt_kst(ts_iso: str) -> str:
 
 def render_markdown(report, fact_pack: dict, cfg: dict) -> str:
     lines = []
-    lines.append(f"# Daily Briefing (as of {report.asof})\n")
+    run_mode = str((fact_pack or {}).get("run_mode") or "")
+    title = "Weekly Briefing" if run_mode == "WEEKLY_RECAP" else "Daily Briefing"
+    lines.append(f"# {title} (as of {report.asof})\n")
     lines.append(f"**Headline:** {report.headline}\n")
 
     market = fact_pack.get("market", []) or []
     if market:
         lines.append("## 시장 데이터(기준일/시각)")
         lines.append("- ret1d_pct는 **일봉 종가 기준 1일 변화율**")
+        lines.append("- ret1w_pct / chg1w_bp는 **최근 5거래일 기준 주간 변화**")
         lines.append("- 마지막 갱신은 yfinance **intraday(예: 5분봉) 마지막 시각**")
         for m in market:
             daily_date = m.get("date", "N/A")
             last_upd = _fmt_kst(m["ref_ts_kst"]) + f" ({m.get('ref_interval','')})" if m.get("ref_ts_kst") else "N/A"
+            move = f"{m.get('ret1d_pct',0):+.2f}%"
+            if m.get("kind") == "yield":
+                move = f"{m.get('chg1d_bp',0):+.1f}bp"
             lines.append(
-                f"- **{m.get('name','')}** {m.get('ret1d_pct',0):+.2f}% | "
-                f"level {m.get('level','')} | Daily: {daily_date} 종가 | 마지막 갱신: {last_upd}"
+                f"- **{m.get('name','')}** {move} | level {m.get('level','')} | Daily: {daily_date} 종가 | 마지막 갱신: {last_upd}"
             )
         run_ts = market[0].get("asof_run_kst", "")
         if run_ts:
