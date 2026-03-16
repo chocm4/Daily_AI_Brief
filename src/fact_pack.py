@@ -49,6 +49,31 @@ def _latest_in_lookback(items: list[dict], region_hint: str, cutoff: dt.datetime
     return keep
 
 
+def _between_kst(items: list[dict], region_hint: str, start_kst: dt.datetime, end_kst: dt.datetime) -> list[dict]:
+    keep = []
+    for n in items:
+        t = _to_kst(n.get("published", ""), region_hint)
+        if t is None:
+            continue
+        if start_kst <= t <= end_kst:
+            keep.append(n)
+    keep = sorted(
+        keep,
+        key=lambda x: _to_kst(x.get("published", ""), x.get("region", region_hint)) or dt.datetime(1970, 1, 1, tzinfo=KST),
+        reverse=True,
+    )
+    return keep
+
+
+def _weekly_window(now_kst: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    current_monday = now_kst.date() - dt.timedelta(days=now_kst.weekday())
+    prev_monday = current_monday - dt.timedelta(days=7)
+    prev_sunday = current_monday - dt.timedelta(days=1)
+    start_kst = dt.datetime(prev_monday.year, prev_monday.month, prev_monday.day, 0, 0, tzinfo=KST)
+    end_kst = dt.datetime(prev_sunday.year, prev_sunday.month, prev_sunday.day, 23, 59, tzinfo=KST)
+    return start_kst, end_kst
+
+
 def _slim_news(n: dict) -> dict:
     return {
         "id": n.get("id"),
@@ -149,9 +174,17 @@ def _build_event_pack(items: list[dict]) -> list[dict]:
     return events
 
 
-def build_fact_pack(asof: dt.date, top_news: list[dict], market: list[dict] | None, cfg: dict) -> dict:
+def build_fact_pack(
+    asof: dt.date,
+    top_news: list[dict],
+    market: list[dict] | None,
+    cfg: dict,
+    run_mode: str | None = None,
+    now_kst: dt.datetime | None = None,
+) -> dict:
     market = market or []
     top_news = top_news or []
+    run_mode = str(run_mode or "")
 
     news_kr = [n for n in top_news if (n.get("region") == "KR")]
     news_gl = [n for n in top_news if (n.get("region") != "KR")]
@@ -159,20 +192,45 @@ def build_fact_pack(asof: dt.date, top_news: list[dict], market: list[dict] | No
     news_kr_slim = [_slim_news(n) for n in news_kr]
     news_gl_slim = [_slim_news(n) for n in news_gl]
 
-    now_kst = dt.datetime.now(tz=KST)
+    now_kst = now_kst or dt.datetime.now(tz=KST)
     lookback_hours = int((cfg.get("rss", {}) or {}).get("lookback_hours", 36))
     cutoff = now_kst - dt.timedelta(hours=lookback_hours)
 
-    news_kr_session = _latest_in_lookback(news_kr_slim, "KR", cutoff)
-    news_overnight = _latest_in_lookback(news_gl_slim, "GLOBAL", cutoff)
+    weekly_mode = run_mode == "WEEKLY_RECAP"
+    if weekly_mode:
+        weekly_start_kst, weekly_end_kst = _weekly_window(now_kst)
+        news_kr_session = _between_kst(news_kr_slim, "KR", weekly_start_kst, weekly_end_kst)
+        news_overnight = _between_kst(news_gl_slim, "GLOBAL", weekly_start_kst, weekly_end_kst)
+        session_note = "전주 월요일 00:00~일요일 23:59 KST 기준 주간 브리프"
+        session_logic = "Previous calendar week window."
+    else:
+        weekly_start_kst, weekly_end_kst = None, None
+        news_kr_session = _latest_in_lookback(news_kr_slim, "KR", cutoff)
+        news_overnight = _latest_in_lookback(news_gl_slim, "GLOBAL", cutoff)
+        session_note = "최근 lookback_hours 기준으로 KR/GLOBAL 최신 뉴스를 구성"
+        session_logic = "Rolling lookback (no fixed cut-offs)."
 
     if len(news_kr_session) < 10:
         news_kr_session = sorted(news_kr_slim, key=lambda x: float(x.get("score", 0.0)), reverse=True)[: min(18, len(news_kr_slim))]
     if len(news_overnight) < 10:
         news_overnight = sorted(news_gl_slim, key=lambda x: float(x.get("score", 0.0)), reverse=True)[: min(18, len(news_gl_slim))]
 
+    selected_events = news_kr_session + news_overnight if weekly_mode else top_news
     prev_bd = _prev_business_day(asof)
-    event_pack = _build_event_pack(top_news)
+    event_pack = _build_event_pack(selected_events)
+
+    session = {
+        "asof": asof.isoformat(),
+        "kr_date_ref": prev_bd.isoformat(),
+        "latest_now_kst": now_kst.isoformat(timespec="minutes"),
+        "lookback_hours": lookback_hours,
+        "latest_window_kst": f"{cutoff.strftime('%Y-%m-%d %H:%M')}~{now_kst.strftime('%Y-%m-%d %H:%M')}",
+        "note": session_note,
+        "weekly_mode": weekly_mode,
+    }
+    if weekly_mode and weekly_start_kst and weekly_end_kst:
+        session["weekly_window_kst"] = f"{weekly_start_kst.strftime('%Y-%m-%d %H:%M')}~{weekly_end_kst.strftime('%Y-%m-%d %H:%M')}"
+        session["weekly_label"] = f"{weekly_start_kst.date().isoformat()} ~ {weekly_end_kst.date().isoformat()}"
 
     return {
         "asof": asof.isoformat(),
@@ -181,14 +239,7 @@ def build_fact_pack(asof: dt.date, top_news: list[dict], market: list[dict] | No
         "news_global": news_gl_slim,
         "events": event_pack,
         "events_top": event_pack[:12],
-        "session": {
-            "asof": asof.isoformat(),
-            "kr_date_ref": prev_bd.isoformat(),
-            "latest_now_kst": now_kst.isoformat(timespec="minutes"),
-            "lookback_hours": lookback_hours,
-            "latest_window_kst": f"{cutoff.strftime('%Y-%m-%d %H:%M')}~{now_kst.strftime('%Y-%m-%d %H:%M')}",
-            "note": "최근 lookback_hours 기준으로 KR/GLOBAL 최신 뉴스를 구성",
-        },
+        "session": session,
         "news_kr_session": news_kr_session,
         "news_overnight": news_overnight,
         "market": market,
@@ -196,7 +247,7 @@ def build_fact_pack(asof: dt.date, top_news: list[dict], market: list[dict] | No
         "notes": {
             "policy": "No verbatim quotes. Paraphrase. Attach source IDs to any news-driven claim.",
             "rss_only": True,
-            "session_logic": "Rolling lookback (no fixed cut-offs).",
+            "session_logic": session_logic,
             "timezone_assumption_if_missing": "KR->KST, GLOBAL->UTC",
             "analyst_style": "관찰-해석-시사점 구조. 근거 없는 단정 금지.",
         },
