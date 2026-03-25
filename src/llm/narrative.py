@@ -815,7 +815,7 @@ def _render_reference_articles(fact_pack: Dict[str, Any]) -> str:
 
 def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg: Dict[str, Any], log=None) -> str:
     llm_cfg = cfg.get("llm", {}) or {}
-    model = llm_cfg.get("story_model", llm_cfg.get("model", "gpt-5.4"))
+    model = llm_cfg.get("story_model", llm_cfg.get("model", "gpt-5.4-mini"))
     temperature = float(llm_cfg.get("story_temperature", 0.1))
     max_tokens = int(llm_cfg.get("story_max_output_tokens", 2400))
     show_reference_articles = bool(llm_cfg.get("show_reference_articles", True))
