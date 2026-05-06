@@ -461,7 +461,7 @@ market:
     # - {name: "VKOSPI", ticker: "<VALID_TICKER>"}
 llm:
   enabled: true
-  model: gpt-5.4-mini
+  model: gpt-5-mini
   max_output_tokens: 7000
   temperature: 0.0
   style:
@@ -472,9 +472,9 @@ llm:
   guardrails:
     require_sources: true
     forbid_verbatim_title_copy: true
-  story_model: gpt-5.4-mini
-  story_fallback_model: gpt-5.4-mini
-  story_editor_model: gpt-5.4-mini
+  story_model: gpt-5-mini
+  story_fallback_model: gpt-5-mini
+  story_editor_model: gpt-5-mini
   story_temperature: 0.15
   story_editor_temperature: 0.1
   story_max_output_tokens: 3200
@@ -501,7 +501,7 @@ nlp:
   cluster_tagging:
     enabled: true
     top_k_titles: 10
-    model: gpt-5.4-mini
+    model: gpt-5-mini
     temperature: 0.1
     max_output_tokens: 800
 story:
