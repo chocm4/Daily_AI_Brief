@@ -9,6 +9,21 @@ from src.llm.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from src.llm.schema import DailyBriefing
 
 
+def _supports_temperature(model: str) -> bool:
+    """GPT-5 family and o-series reasoning models do not accept temperature on the Responses API."""
+    m = (model or "").lower()
+    if m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
+        return False
+    return True
+
+
+def _build_responses_kwargs(model: str, messages, temperature: float, max_out: int) -> dict:
+    kwargs = {"model": model, "input": messages, "max_output_tokens": max_out}
+    if _supports_temperature(model):
+        kwargs["temperature"] = temperature
+    return kwargs
+
+
 def _extract_text(resp) -> str:
     if hasattr(resp, "output_text") and resp.output_text:
         return resp.output_text
@@ -484,7 +499,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
         {"role": "user", "content": USER_PROMPT_TEMPLATE.format(fact_pack_json=fact_pack_json)},
     ]
 
-    resp = client.responses.create(model=model, input=messages, temperature=temperature, max_output_tokens=max_out)
+    resp = client.responses.create(**_build_responses_kwargs(model, messages, temperature, max_out))
     text = _extract_text(resp)
     try:
         d = _safe_json_load(text)
@@ -503,7 +518,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
 {text}
 """},
         ]
-        resp2 = client.responses.create(model=model, input=repair_messages, temperature=0, max_output_tokens=max_out)
+        resp2 = client.responses.create(**_build_responses_kwargs(model, repair_messages, 0, max_out))
         text2 = _extract_text(resp2)
         d2 = _safe_json_load(text2)
         d2 = _normalize(d2, fact_pack)

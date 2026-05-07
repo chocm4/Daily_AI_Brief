@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 
+def _supports_temperature(model: str) -> bool:
+    """GPT-5 family and o-series reasoning models do not accept temperature on the Responses API."""
+    m = (model or "").lower()
+    if m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
+        return False
+    return True
+
+
 MARKET_KEYS = [
     "KOSPI", "KOSDAQ", "코스피", "코스닥",
     "원/달러", "USDKRW", "환율",
@@ -879,15 +887,17 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
 
         try:
-            resp = client.responses.create(
-                model=model,
-                input=[
+            resp_kwargs = {
+                "model": model,
+                "input": [
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            )
+                "max_output_tokens": max_tokens,
+            }
+            if _supports_temperature(model):
+                resp_kwargs["temperature"] = temperature
+            resp = client.responses.create(**resp_kwargs)
             body = getattr(resp, "output_text", "") or ""
         except Exception as e:
             if log:
