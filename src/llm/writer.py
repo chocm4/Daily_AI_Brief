@@ -7,46 +7,14 @@ from openai import OpenAI
 
 from src.llm.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from src.llm.schema import DailyBriefing
-
-
-def _is_reasoning_model(model: str) -> bool:
-    """GPT-5 family and o-series are reasoning models on the Responses API."""
-    m = (model or "").lower()
-    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
-
-
-def _supports_temperature(model: str) -> bool:
-    """Reasoning models do not accept temperature on the Responses API."""
-    return not _is_reasoning_model(model)
-
-
-def _build_responses_kwargs(
-    model: str,
-    messages,
-    temperature: float,
-    max_out: int,
-    reasoning_effort: str | None = None,
-) -> dict:
-    kwargs = {"model": model, "input": messages, "max_output_tokens": max_out}
-    if _supports_temperature(model):
-        kwargs["temperature"] = temperature
-    if reasoning_effort and _is_reasoning_model(model):
-        kwargs["reasoning"] = {"effort": reasoning_effort}
-    return kwargs
-
-
-def _extract_text(resp) -> str:
-    if hasattr(resp, "output_text") and resp.output_text:
-        return resp.output_text
-    try:
-        parts = []
-        for out in getattr(resp, "output", []) or []:
-            for c in getattr(out, "content", []) or []:
-                if getattr(c, "type", "") in ("output_text", "text") and getattr(c, "text", None):
-                    parts.append(c.text)
-        return "".join(parts)
-    except Exception:
-        return str(resp)
+from src.llm._common import (
+    build_responses_kwargs as _build_responses_kwargs,
+    extract_text as _extract_text,
+    to_float as _to_float,
+    fmt_pct as _fmt_pct,
+    fmt_bp as _fmt_bp,
+    fmt_1e8 as _fmt_1e8,
+)
 
 
 def _strip_code_fences(s: str) -> str:
@@ -79,36 +47,6 @@ def _ensure_list(v):
     if isinstance(v, list):
         return v
     return [v]
-
-
-def _to_float(x) -> Optional[float]:
-    try:
-        if x is None or x == "":
-            return None
-        return float(x)
-    except Exception:
-        return None
-
-
-def _fmt_pct(v) -> str:
-    v = _to_float(v)
-    if v is None:
-        return "데이터 없음"
-    return f"{v:+.2f}%"
-
-
-def _fmt_bp(v) -> str:
-    v = _to_float(v)
-    if v is None:
-        return "데이터 없음"
-    return f"{v:+.1f}bp"
-
-
-def _fmt_1e8(v) -> str:
-    v = _to_float(v)
-    if v is None:
-        return "데이터 없음"
-    return f"{v:+,.0f}억원"
 
 
 def _investor_display(name: Optional[str]) -> str:

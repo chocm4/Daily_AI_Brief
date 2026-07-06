@@ -6,16 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
 
-
-def _is_reasoning_model(model: str) -> bool:
-    """GPT-5 family and o-series are reasoning models on the Responses API."""
-    m = (model or "").lower()
-    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
-
-
-def _supports_temperature(model: str) -> bool:
-    """Reasoning models do not accept temperature on the Responses API."""
-    return not _is_reasoning_model(model)
+from src.llm._common import (
+    build_responses_kwargs as _build_responses_kwargs,
+    to_float as _to_float,
+    fmt_pct as _fmt_pct,
+    fmt_bp as _fmt_bp,
+)
 
 
 MARKET_KEYS = [
@@ -25,29 +21,6 @@ MARKET_KEYS = [
     "S&P500", "NASDAQ", "나스닥", "VIX", "WTI",
     "MSCI ACWI", "MSCI DM", "MSCI EM", "DXY", "MOVE", "VKOSPI",
 ]
-
-
-def _to_float(x):
-    try:
-        if x is None or x == "":
-            return None
-        return float(x)
-    except Exception:
-        return None
-
-
-def _fmt_pct(v) -> str:
-    v = _to_float(v)
-    if v is None:
-        return "데이터 없음"
-    return f"{v:+.2f}%"
-
-
-def _fmt_bp(v) -> str:
-    v = _to_float(v)
-    if v is None:
-        return "데이터 없음"
-    return f"{v:+.1f}bp"
 
 
 def _fmt_level(name: str, level: Any, kind: str = "price") -> str:
@@ -897,18 +870,11 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
         user_prompt = "다음 JSON을 바탕으로 시황 본문만 작성해라.\n" + json.dumps(context, ensure_ascii=False)
 
         try:
-            resp_kwargs = {
-                "model": model,
-                "input": [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "max_output_tokens": max_tokens,
-            }
-            if _supports_temperature(model):
-                resp_kwargs["temperature"] = temperature
-            if reasoning_effort and _is_reasoning_model(model):
-                resp_kwargs["reasoning"] = {"effort": reasoning_effort}
+            messages = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            resp_kwargs = _build_responses_kwargs(model, messages, temperature, max_tokens, reasoning_effort)
             resp = client.responses.create(**resp_kwargs)
             body = getattr(resp, "output_text", "") or ""
         except Exception as e:
