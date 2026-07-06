@@ -479,7 +479,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
 
     client = OpenAI(api_key=api_key)
     llm_cfg = cfg.get("llm", {}) or {}
-    model = llm_cfg.get("model", "gpt-5.4-mini")
+    model = llm_cfg.get("model", "gpt-5-mini")
     temperature = float(llm_cfg.get("temperature", 0.15))
     max_out = int(llm_cfg.get("max_output_tokens", 3200))
 
