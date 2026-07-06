@@ -9,18 +9,29 @@ from src.llm.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from src.llm.schema import DailyBriefing
 
 
-def _supports_temperature(model: str) -> bool:
-    """GPT-5 family and o-series reasoning models do not accept temperature on the Responses API."""
+def _is_reasoning_model(model: str) -> bool:
+    """GPT-5 family and o-series are reasoning models on the Responses API."""
     m = (model or "").lower()
-    if m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
-        return False
-    return True
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
 
 
-def _build_responses_kwargs(model: str, messages, temperature: float, max_out: int) -> dict:
+def _supports_temperature(model: str) -> bool:
+    """Reasoning models do not accept temperature on the Responses API."""
+    return not _is_reasoning_model(model)
+
+
+def _build_responses_kwargs(
+    model: str,
+    messages,
+    temperature: float,
+    max_out: int,
+    reasoning_effort: str | None = None,
+) -> dict:
     kwargs = {"model": model, "input": messages, "max_output_tokens": max_out}
     if _supports_temperature(model):
         kwargs["temperature"] = temperature
+    if reasoning_effort and _is_reasoning_model(model):
+        kwargs["reasoning"] = {"effort": reasoning_effort}
     return kwargs
 
 
@@ -482,6 +493,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
     model = llm_cfg.get("model", "gpt-5-mini")
     temperature = float(llm_cfg.get("temperature", 0.15))
     max_out = int(llm_cfg.get("max_output_tokens", 3200))
+    reasoning_effort = (str(llm_cfg.get("reasoning_effort", "high") or "").strip() or None)
 
     fact_pack_json = json.dumps(fact_pack, ensure_ascii=False)
     sys = SYSTEM_PROMPT + """
@@ -499,7 +511,7 @@ def generate_report(fact_pack: dict, cfg: dict, log=None) -> DailyBriefing:
         {"role": "user", "content": USER_PROMPT_TEMPLATE.format(fact_pack_json=fact_pack_json)},
     ]
 
-    resp = client.responses.create(**_build_responses_kwargs(model, messages, temperature, max_out))
+    resp = client.responses.create(**_build_responses_kwargs(model, messages, temperature, max_out, reasoning_effort))
     text = _extract_text(resp)
     try:
         d = _safe_json_load(text)

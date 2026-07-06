@@ -7,12 +7,15 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 
-def _supports_temperature(model: str) -> bool:
-    """GPT-5 family and o-series reasoning models do not accept temperature on the Responses API."""
+def _is_reasoning_model(model: str) -> bool:
+    """GPT-5 family and o-series are reasoning models on the Responses API."""
     m = (model or "").lower()
-    if m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
-        return False
-    return True
+    return m.startswith("gpt-5") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+
+
+def _supports_temperature(model: str) -> bool:
+    """Reasoning models do not accept temperature on the Responses API."""
+    return not _is_reasoning_model(model)
 
 
 MARKET_KEYS = [
@@ -826,6 +829,7 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
     model = llm_cfg.get("story_model", llm_cfg.get("model", "gpt-5-mini"))
     temperature = float(llm_cfg.get("story_temperature", 0.1))
     max_tokens = int(llm_cfg.get("story_max_output_tokens", 2400))
+    reasoning_effort = (str(llm_cfg.get("story_reasoning_effort", llm_cfg.get("reasoning_effort", "high")) or "").strip() or None)
     show_reference_articles = bool(llm_cfg.get("show_reference_articles", True))
 
     asof = fact_pack.get("asof") or ""
@@ -849,6 +853,12 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
 너는 한국 sell-side 데일리 시황 작성자다.
 반드시 제공된 JSON 안의 정보만 사용한다.
 새 사실, 새 숫자, 새 기사, 새 해석 축을 임의로 추가하지 마라.
+
+핵심 이슈 중심 서술:
+- events_top / top_drivers를 바탕으로 오늘 시장을 실제로 움직인 핵심 이슈 2~4개를 골라, 그 이슈들을 중심 축으로 본문을 전개하라.
+- 각 핵심 이슈는 '무슨 일 -> 가격/수급 반응 -> 한국 증시로의 연결(수급/업종/금리/환율/밸류에이션) -> 시사점' 흐름으로 자연스럽게 풀어라.
+- 뉴스와 가격 반응이 어긋나면(선반영·피로 또는 다른 동인) 그 괴리를 한두 문장으로 짚어라.
+- 부차적 재료는 과감히 생략하고, 핵심 이슈에 지면을 몰아줘라. 백화점식 나열을 피하라.
 
 출력 규칙:
 - 처음부터 끝까지 자연스럽게 읽히는 서술형 한국어 본문만 작성하라.
@@ -897,6 +907,8 @@ def generate_narrative_md(fact_pack: Dict[str, Any], report: Dict[str, Any], cfg
             }
             if _supports_temperature(model):
                 resp_kwargs["temperature"] = temperature
+            if reasoning_effort and _is_reasoning_model(model):
+                resp_kwargs["reasoning"] = {"effort": reasoning_effort}
             resp = client.responses.create(**resp_kwargs)
             body = getattr(resp, "output_text", "") or ""
         except Exception as e:

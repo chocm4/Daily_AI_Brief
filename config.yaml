@@ -462,8 +462,11 @@ market:
 llm:
   enabled: true
   model: gpt-5-mini
-  max_output_tokens: 7000
+  max_output_tokens: 12000
   temperature: 0.0
+  # gpt-5 계열 reasoning effort (minimal|low|medium|high). 깊은 분석용으로 high.
+  # 추론 토큰이 max_output_tokens 예산을 함께 소비하므로 위 값을 넉넉히 둔다.
+  reasoning_effort: high
   style:
     tone: sell-side quant morning note
     bullets_max: 7
@@ -477,7 +480,9 @@ llm:
   story_editor_model: gpt-5-mini
   story_temperature: 0.15
   story_editor_temperature: 0.1
-  story_max_output_tokens: 3200
+  # story도 reasoning effort를 별도로 지정. 추론 토큰 여유분 포함해 토큰 상향.
+  story_reasoning_effort: high
+  story_max_output_tokens: 7000
   story_editor_max_output_tokens: 3200
   show_sources_in_story: false
   show_reference_articles: true
